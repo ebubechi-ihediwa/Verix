@@ -1,54 +1,54 @@
-import { createCipheriv, createDecipheriv, randomBytes } from "crypto";
+import {
+  createCipheriv,
+  createDecipheriv,
+  createHash,
+  randomBytes,
+} from "crypto";
+import { getEncryptionSecret } from "@/lib/env";
 
 /**
  * AES-256-GCM encryption for API keys.
- * Uses a server-side secret from ENCRYPTION_KEY env var (or falls back to JWT_SECRET).
+ * Uses ENCRYPTION_KEY or JWT_SECRET from env.
  */
 
 const ALGORITHM = "aes-256-gcm";
 
 function getEncryptionKey(): Buffer {
-    const secret = process.env.ENCRYPTION_KEY || process.env.JWT_SECRET || "default-dev-key-change-in-production!!";
-    // Derive a 32-byte key from the secret
-    const crypto = require("crypto");
-    return crypto.createHash("sha256").update(secret).digest();
+  const secret = getEncryptionSecret();
+  return createHash("sha256").update(secret).digest();
 }
 
 export function encrypt(text: string): string {
-    const key = getEncryptionKey();
-    const iv = randomBytes(12);
-    const cipher = createCipheriv(ALGORITHM, key, iv);
+  const key = getEncryptionKey();
+  const iv = randomBytes(12);
+  const cipher = createCipheriv(ALGORITHM, key, iv);
 
-    let encrypted = cipher.update(text, "utf8", "hex");
-    encrypted += cipher.final("hex");
-    const authTag = cipher.getAuthTag().toString("hex");
+  let encrypted = cipher.update(text, "utf8", "hex");
+  encrypted += cipher.final("hex");
+  const authTag = cipher.getAuthTag().toString("hex");
 
-    // Format: iv:authTag:ciphertext
-    return `${iv.toString("hex")}:${authTag}:${encrypted}`;
+  return `${iv.toString("hex")}:${authTag}:${encrypted}`;
 }
 
 export function decrypt(encryptedText: string): string {
-    const key = getEncryptionKey();
-    const [ivHex, authTagHex, ciphertext] = encryptedText.split(":");
+  const key = getEncryptionKey();
+  const [ivHex, authTagHex, ciphertext] = encryptedText.split(":");
 
-    if (!ivHex || !authTagHex || !ciphertext) {
-        throw new Error("Invalid encrypted text format");
-    }
+  if (!ivHex || !authTagHex || !ciphertext) {
+    throw new Error("Invalid encrypted text format");
+  }
 
-    const iv = Buffer.from(ivHex, "hex");
-    const authTag = Buffer.from(authTagHex, "hex");
-    const decipher = createDecipheriv(ALGORITHM, key, iv);
-    decipher.setAuthTag(authTag);
+  const iv = Buffer.from(ivHex, "hex");
+  const authTag = Buffer.from(authTagHex, "hex");
+  const decipher = createDecipheriv(ALGORITHM, key, iv);
+  decipher.setAuthTag(authTag);
 
-    let decrypted = decipher.update(ciphertext, "hex", "utf8");
-    decrypted += decipher.final("utf8");
-    return decrypted;
+  let decrypted = decipher.update(ciphertext, "hex", "utf8");
+  decrypted += decipher.final("utf8");
+  return decrypted;
 }
 
-/**
- * Mask an API key for display: "sk-abc...xyz1"
- */
 export function maskApiKey(key: string): string {
-    if (key.length <= 8) return "••••••••";
-    return `${key.slice(0, 6)}...${key.slice(-4)}`;
+  if (key.length <= 8) return "********";
+  return `${key.slice(0, 6)}...${key.slice(-4)}`;
 }

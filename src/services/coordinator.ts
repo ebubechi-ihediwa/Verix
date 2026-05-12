@@ -11,18 +11,19 @@ import {
   getAllSpecialists,
 } from "@/services/discovery";
 import { decrypt } from "@/lib/encryption";
+import { getMockedComponents, getRuntimeMode } from "@/lib/env";
 
-const EXPLORER_URL = "https://staging-utter-unripe-menkar.explorer.staging-v3.skalenodes.com";
+function getAnthropicClient(apiKey?: string): Anthropic | null {
+  const key = apiKey || process.env.CLAUDE_API_KEY;
+  if (!key) return null;
+  return new Anthropic({ apiKey: key });
+}
 
-// Claude for code analysis (superior at code understanding)
-const anthropic = new Anthropic({
-  apiKey: process.env.CLAUDE_API_KEY,
-});
-
-// OpenAI for writing and general analysis
-const openai = new OpenAI({
-  apiKey: process.env.OPENAI_API_KEY,
-});
+function getOpenAIClient(apiKey?: string): OpenAI | null {
+  const key = apiKey || process.env.OPENAI_API_KEY;
+  if (!key) return null;
+  return new OpenAI({ apiKey: key });
+}
 
 /**
  * Helper: push an event to the task's event log
@@ -52,6 +53,18 @@ export async function executeCoordinator(
   console.log(`[Coordinator] Starting task ${taskId}: ${description}`);
 
   await pushEvent(taskId, "coordinator", "Coordinator received task. Analyzing with AI...", "info");
+
+  const runtimeMode = getRuntimeMode();
+  const mocked = getMockedComponents();
+  if (runtimeMode === "demo" || mocked.length > 0) {
+    const mockedLabel = mocked.length > 0 ? mocked.join(", ") : "none";
+    await pushEvent(
+      taskId,
+      "system",
+      `Runtime mode: ${runtimeMode}. Mocked components: ${mockedLabel}.`,
+      "info"
+    );
+  }
 
   // Phase 1: AI-powered task decomposition
   const subtasks = await decomposeTaskWithAI(description);
@@ -235,9 +248,15 @@ ${specialists.map((s) => `- **${s.name}** ($${s.priceUsdc} USDC): ${s.descriptio
 Example response format:
 [{"specialistName": "CodeAuditor", "reason": "Task requires security analysis"}]
 
-Return ONLY the JSON array:`;
+  Return ONLY the JSON array:`;
 
   try {
+    const openai = getOpenAIClient();
+    if (!openai) {
+      console.log("[Coordinator] OPENAI_API_KEY missing, using keyword fallback routing");
+      return decomposeTaskFallback(description);
+    }
+
     console.log("[Coordinator] Using AI to route task...");
 
     const completion = await openai.chat.completions.create({
@@ -376,7 +395,7 @@ Format your response in markdown. Be thorough but concise.`;
     try {
       agentApiKey = decrypt(specialist.apiKey);
       console.log(`[${subtask.specialistName}] Using agent's own API key`);
-    } catch (err) {
+    } catch {
       console.warn(`[${subtask.specialistName}] Failed to decrypt API key, using global key`);
     }
   }
@@ -386,8 +405,11 @@ Format your response in markdown. Be thorough but concise.`;
     try {
       console.log(`[${subtask.specialistName}] Using Claude (preferred)...`);
       const claudeClient = agentApiKey
-        ? new Anthropic({ apiKey: agentApiKey })
-        : anthropic;
+        ? getAnthropicClient(agentApiKey)
+        : getAnthropicClient();
+      if (!claudeClient) {
+        throw new Error("CLAUDE_API_KEY is not configured");
+      }
       const message = await claudeClient.messages.create({
         model: "claude-3-5-sonnet-20241022",
         max_tokens: 1500,
@@ -412,8 +434,11 @@ Format your response in markdown. Be thorough but concise.`;
     console.log(`[${subtask.specialistName}] Using OpenAI ${modelInfo}...`);
 
     const openaiClient = (!preferClaude && agentApiKey)
-      ? new OpenAI({ apiKey: agentApiKey })
-      : openai;
+      ? getOpenAIClient(agentApiKey)
+      : getOpenAIClient();
+    if (!openaiClient) {
+      throw new Error("OPENAI_API_KEY is not configured");
+    }
     const completion = await openaiClient.chat.completions.create({
       model: "gpt-4o",
       max_tokens: 1500,

@@ -82,8 +82,31 @@ npm install
 
 Copy `.env.local.example` to `.env.local` and fill in:
 
+```bash
+cp .env.local.example .env.local
+```
+
+Runtime profiles:
+
+| `VERIX_MODE` | Use case | Missing AI keys | Missing wallet keys | Encryption secret rule |
+| --- | --- | --- | --- | --- |
+| `demo` | Hackathon demo and UI walkthroughs | marked as mocked | marked as mocked | can use fallback secret |
+| `local` | local development | marked as mocked | marked as mocked | can use fallback secret |
+| `production` | production-like deployment | still marked as mocked in task events | fail during payment flow | must set `ENCRYPTION_KEY` or `JWT_SECRET` |
+
+Minimum required variables for build and runtime:
+
 ```env
-# AI APIs (optional - falls back to mock)
+# Runtime profile
+VERIX_MODE=local
+
+# Required in all profiles (build + runtime)
+DATABASE_URL=postgresql://USER:PASSWORD@HOST:5432/DB?schema=public
+
+# Required in production profile
+ENCRYPTION_KEY=replace-with-strong-random-secret
+
+# AI APIs (optional - missing keys are mocked and labeled)
 CLAUDE_API_KEY=sk-ant-...
 OPENAI_API_KEY=sk-proj-...
 
@@ -98,12 +121,18 @@ MARKET_ANALYST_PRIVATE_KEY=0x...
 CREATIVE_WRITER_PRIVATE_KEY=0x...
 ```
 
-### 3. Get testnet tokens
+### 3. Build/deploy notes
+
+- `npm run build` runs `prisma generate`, so `DATABASE_URL` must be set even for demo mode.
+- If `VERIX_MODE=production` and no secure `ENCRYPTION_KEY` is set, startup fails with a clear env error.
+- In `demo` and `local` modes, mocked components are explicitly shown in task events.
+
+### 4. Get testnet tokens
 
 - **sFUEL**: Visit [sfuelstation.com](https://sfuelstation.com) and request tokens for SKALE Calypso Hub Testnet
 - **TestUSDC**: The coordinator wallet was pre-minted 1M USDC on deploy. Or call `mint()` on the contract.
 
-### 4. Run
+### 5. Run
 
 ```bash
 npm run dev
