@@ -19,6 +19,7 @@
 import { env } from "@/lib/env";
 import { prisma } from "@/lib/db";
 import { STELLAR_USDC } from "@/lib/stellar-config";
+import { fetchWithTimeout } from "@/lib/timeout";
 import { ExecutionReceipt } from "@/types/trace";
 import { recordTraceEvent } from "@/services/trace";
 import {
@@ -90,14 +91,19 @@ class TrustlessWorkAdapter implements EscrowProvider {
     path: string,
     body?: unknown
   ): Promise<T> {
-    const res = await fetch(`${this.baseUrl}${path}`, {
-      method,
-      headers: {
-        "Content-Type": "application/json",
-        "x-api-key": this.apiKey,
+    const res = await fetchWithTimeout(
+      `${this.baseUrl}${path}`,
+      {
+        method,
+        headers: {
+          "Content-Type": "application/json",
+          "x-api-key": this.apiKey,
+        },
+        body: body != null ? JSON.stringify(body) : undefined,
       },
-      body: body != null ? JSON.stringify(body) : undefined,
-    });
+      env.EXTERNAL_API_TIMEOUT_MS,
+      `Trustless Work ${method} ${path}`
+    );
 
     if (!res.ok) {
       let errMsg = `Trustless Work API error ${res.status}`;

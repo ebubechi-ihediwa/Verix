@@ -717,7 +717,7 @@ Format your response in markdown. Be thorough but concise.`;
     return { output: "Analysis completed successfully.", model: "gpt-4o", provider: "openai" };
   } catch (error) {
     console.warn(`[${subtask.specialistName}] OpenAI also failed, using fallback response:`, error);
-    const fallbackText = `# ${subtask.specialistName} Report\n\nAnalysis completed for: "${originalTask.substring(0, 100)}"\n\nBoth AI providers were unavailable. Please try again later.\n\n---\n*${subtask.specialistName} | $${subtask.cost?.toFixed(2)} USDC via Stellar escrow*`;
+    const fallbackText = `# ${subtask.specialistName} Report\n\n**Demo fallback artifact:** both configured AI providers were unavailable, so Verix generated a labeled backup response to keep the demo execution trace complete.\n\nAnalysis target: "${originalTask.substring(0, 140)}"\n\n## Fallback Findings\n\n- The coordinator recorded a real trace event for this fallback path.\n- The receipt can still commit to the fallback output hash.\n- This does not claim live LLM inference occurred.\n\n---\n*${subtask.specialistName} | $${subtask.cost?.toFixed(2)} USDC via Stellar escrow*`;
     return { output: fallbackText, model: "none", provider: "fallback" };
   }
 }

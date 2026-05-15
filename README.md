@@ -45,9 +45,16 @@ TRUSTLESS_WORK_API_URL=https://dev.api.trustlesswork.com
 TRUSTLESS_WORK_API_KEY=...
 TRUSTLESS_WORK_SIGNER_ADDRESS=G...
 TRUSTLESS_WORK_ESCROW_TYPE=multi-release
+EXTERNAL_API_TIMEOUT_MS=12000
+DEMO_FALLBACKS_ENABLED=false
 SOROBAN_AGENT_REGISTRY_CONTRACT_ID=C...
 SOROBAN_RECEIPT_ANCHOR_CONTRACT_ID=C...
 ```
+
+`DEMO_FALLBACKS_ENABLED=true` allows explicitly labeled backup artifacts when
+external services are unavailable during a controlled presentation. Fallback
+proofs use `verifierType = "demo-fallback"` and are not silent production
+claims.
 
 ## Development
 
