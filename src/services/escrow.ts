@@ -20,6 +20,7 @@ import { env } from "@/lib/env";
 import { prisma } from "@/lib/db";
 import { STELLAR_USDC } from "@/lib/stellar-config";
 import { fetchWithTimeout } from "@/lib/timeout";
+import { createLogger } from "@/utils/logger";
 import { ExecutionReceipt } from "@/types/trace";
 import { recordTraceEvent } from "@/services/trace";
 import {
@@ -33,13 +34,15 @@ import {
   ReleaseMilestoneResult,
 } from "@/types/escrow";
 
+const logger = createLogger("escrow");
+
 // ── Demo adapter ─────────────────────────────────────────────────────────────
 
 class DemoEscrowAdapter implements EscrowProvider {
   private prefix = "DEMO";
 
   async createEscrow(input: CreateEscrowInput): Promise<CreateEscrowResult> {
-    console.log(`[DemoEscrow] createEscrow task=${input.taskId} amount=${input.totalAmount}`);
+    logger.info("Demo escrow created", { taskId: input.taskId, amount: input.totalAmount });
     return {
       externalId: `${this.prefix}-ESC-${input.taskId.slice(0, 8)}`,
       status: "funded",
@@ -47,7 +50,7 @@ class DemoEscrowAdapter implements EscrowProvider {
   }
 
   async fundEscrow(input: FundEscrowInput): Promise<FundEscrowResult> {
-    console.log(`[DemoEscrow] fundEscrow escrow=${input.escrowId} amount=${input.amount}`);
+    logger.info("Demo escrow funded", { escrowId: input.escrowId, amount: input.amount });
     return { status: "funded", txHash: `0xDEMO-${Date.now()}` };
   }
 
@@ -56,7 +59,7 @@ class DemoEscrowAdapter implements EscrowProvider {
   }
 
   async releaseMilestone(input: ReleaseMilestoneInput): Promise<ReleaseMilestoneResult> {
-    console.log(`[DemoEscrow] releaseMilestone milestone=${input.milestoneId}`);
+    logger.info("Demo milestone released", { escrowId: input.escrowId, milestoneId: input.milestoneId });
     return {
       status: "released",
       txHash: `0xDEMO-REL-${Date.now()}`,
@@ -65,7 +68,7 @@ class DemoEscrowAdapter implements EscrowProvider {
   }
 
   async cancelEscrow(externalId: string): Promise<void> {
-    console.log(`[DemoEscrow] cancelEscrow externalId=${externalId}`);
+    logger.warn("Demo escrow cancelled", { escrowId: externalId });
   }
 }
 
@@ -126,7 +129,7 @@ class TrustlessWorkAdapter implements EscrowProvider {
       );
       return result.txHash ?? result.hash;
     } catch (err) {
-      console.warn("[TrustlessWork] send-transaction failed:", err);
+      logger.warn("Trustless Work send-transaction failed", { errorMsg: err instanceof Error ? err.message : "Unknown error" });
       return undefined;
     }
   }
@@ -386,7 +389,7 @@ export async function releaseEscrowMilestones(
       released++;
     } catch (err) {
       const error = err instanceof Error ? err.message : "Unknown error";
-      console.error(`[Escrow] releaseMilestone failed for ${milestone.id}:`, error);
+      logger.error("Milestone release failed", { taskId, escrowId: escrow.id, milestoneId: milestone.id, errorMsg: error });
 
       await prisma.escrowMilestone.update({
         where: { id: milestone.id },
@@ -419,9 +422,7 @@ export async function releaseEscrowMilestones(
     }).catch(() => { /* non-fatal */ });
   }
 
-  console.log(
-    `[Escrow] releaseEscrowMilestones task=${taskId}: released=${released} failed=${failed} skipped=${skipped}`
-  );
+  logger.info("Escrow milestone release sweep completed", { taskId, escrowId: escrow.id, released, failed, skipped });
 
   return { released, failed, skipped };
 }
@@ -490,7 +491,7 @@ export async function syncEscrowStatus(escrowId: string): Promise<{
     return { escrow: updated, synced: true };
   } catch (err) {
     const error = err instanceof Error ? err.message : "Unknown sync error";
-    console.error(`[Escrow] syncEscrowStatus failed for ${escrowId}:`, error);
+    logger.error("Escrow status sync failed", { escrowId, errorMsg: error });
     return { escrow, synced: false, error };
   }
 }

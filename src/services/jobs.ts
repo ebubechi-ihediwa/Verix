@@ -17,6 +17,9 @@
  */
 
 import { prisma } from "@/lib/db";
+import { createLogger } from "@/utils/logger";
+
+const logger = createLogger("jobs");
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -106,7 +109,7 @@ export async function enqueueJob(
   if (taskId) {
     const existing = await getJobForTask(taskId, type);
     if (existing && existing.status !== "failed") {
-      console.log(`[Jobs] Returning existing ${type} job ${existing.id} (${existing.status})`);
+      logger.info("Returning existing job", { jobId: existing.id, taskId, type, status: existing.status });
       return existing;
     }
   }
@@ -133,10 +136,10 @@ export async function enqueueJob(
         maxAttempts: job.maxAttempts,
       },
     });
-    console.log(`[Jobs] Enqueued ${type} job ${row.id}`);
+    logger.info("Enqueued job", { jobId: row.id, taskId, type });
     return toJob(row);
   } catch (err) {
-    console.warn("[Jobs] DB unavailable, using in-memory job store:", (err as Error).message?.slice(0, 80));
+    logger.warn("DB unavailable, using in-memory job store", { taskId, type, errorMsg: (err as Error).message?.slice(0, 160) });
     getInMemoryStore().set(job.id, job);
     return job;
   }
@@ -161,14 +164,14 @@ export async function startJob(jobId: string): Promise<boolean> {
     });
 
     if (result.count === 1) {
-      console.log(`[Jobs] Claimed job ${jobId}`);
+      logger.info("Claimed job", { jobId });
       return true;
     }
 
-    console.warn(`[Jobs] Failed to claim job ${jobId} — already running or completed`);
+    logger.warn("Failed to claim job", { jobId, reason: "already running or completed" });
     return false;
   } catch (err) {
-    console.warn("[Jobs] DB unavailable for startJob:", (err as Error).message?.slice(0, 80));
+    logger.warn("DB unavailable for startJob", { jobId, errorMsg: (err as Error).message?.slice(0, 160) });
     // In-memory fallback: CAS-style claim
     const store = getInMemoryStore();
     const job = store.get(jobId);
@@ -195,9 +198,9 @@ export async function completeJob(
       where: { id: jobId },
       data: { status: "completed", result: result as object, completedAt: new Date() },
     });
-    console.log(`[Jobs] Completed job ${jobId}`);
+    logger.info("Completed job", { jobId });
   } catch (err) {
-    console.warn("[Jobs] DB unavailable for completeJob:", (err as Error).message?.slice(0, 80));
+    logger.warn("DB unavailable for completeJob", { jobId, errorMsg: (err as Error).message?.slice(0, 160) });
     const store = getInMemoryStore();
     const job = store.get(jobId);
     if (job) {
@@ -228,7 +231,7 @@ export async function failJob(jobId: string, errorMsg: string): Promise<boolean>
     });
 
     if (!current) {
-      console.error(`[Jobs] Cannot fail unknown job ${jobId}`);
+      logger.error("Cannot fail unknown job", { jobId });
       return false;
     }
 
@@ -245,14 +248,14 @@ export async function failJob(jobId: string, errorMsg: string): Promise<boolean>
     });
 
     if (exhausted) {
-      console.error(`[Jobs] Job ${jobId} permanently failed after ${current.attempts} attempt(s): ${errorMsg}`);
+      logger.error("Job permanently failed", { jobId, attempts: current.attempts, errorMsg });
     } else {
-      console.warn(`[Jobs] Job ${jobId} failed (attempt ${current.attempts}/${current.maxAttempts}), re-queued`);
+      logger.warn("Job failed and re-queued", { jobId, attempts: current.attempts, maxAttempts: current.maxAttempts, errorMsg });
     }
 
     return !exhausted;
   } catch (err) {
-    console.warn("[Jobs] DB unavailable for failJob:", (err as Error).message?.slice(0, 80));
+    logger.warn("DB unavailable for failJob", { jobId, errorMsg: (err as Error).message?.slice(0, 160) });
     const store = getInMemoryStore();
     const job = store.get(jobId);
     if (job) {
@@ -321,5 +324,22 @@ export async function getJobsForTask(taskId: string): Promise<Job[]> {
     return Array.from(store.values())
       .filter((j) => j.taskId === taskId)
       .sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+  }
+}
+
+export async function listRecentJobs(limit = 25, status?: JobStatus): Promise<Job[]> {
+  try {
+    const rows = await prisma.job.findMany({
+      where: status ? { status } : undefined,
+      orderBy: { createdAt: "desc" },
+      take: limit,
+    });
+    return rows.map(toJob);
+  } catch {
+    const store = getInMemoryStore();
+    return Array.from(store.values())
+      .filter((job) => !status || job.status === status)
+      .sort((a, b) => b.createdAt.localeCompare(a.createdAt))
+      .slice(0, limit);
   }
 }
