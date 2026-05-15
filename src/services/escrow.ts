@@ -9,6 +9,8 @@
 
 import { env } from "@/lib/env";
 import { prisma } from "@/lib/db";
+import { ExecutionReceipt } from "@/types/trace";
+import { recordTraceEvent } from "@/services/trace";
 import {
   EscrowProvider,
   CreateEscrowInput,
@@ -219,6 +221,149 @@ export async function releaseMilestone(
   const provider = getEscrowProvider();
   if (!provider) throw new Error("[escrow] Escrow is disabled (ESCROW_MODE=disabled).");
   return provider.releaseMilestone(input);
+}
+
+// ── Proof-gated milestone release (Issue #21) ────────────────────────────────
+
+/**
+ * Release all eligible escrow milestones for a task, gated on the receipt.
+ *
+ * Release condition guards:
+ *   "auto"            — released immediately regardless of receipt status (demo)
+ *   "receipt_ready"   — receipt must exist (proof_ready or verified)
+ *   "proof_verified"  — receipt.status must be "verified"
+ *   "manual"          — skipped by this function; requires explicit API call
+ *
+ * Each milestone is released independently — a failure on one does not block
+ * the others. Results are recorded as milestone_released / milestone_release_failed
+ * trace events so they surface in the dashboard.
+ */
+export async function releaseEscrowMilestones(
+  taskId: string,
+  receipt: ExecutionReceipt
+): Promise<{ released: number; failed: number; skipped: number }> {
+  const provider = getEscrowProvider();
+  if (!provider) return { released: 0, failed: 0, skipped: 0 };
+
+  const escrow = await prisma.escrow.findUnique({
+    where: { taskId },
+    include: { milestones: true },
+  });
+  if (!escrow) return { released: 0, failed: 0, skipped: 0 };
+
+  const pendingMilestones = escrow.milestones.filter(
+    (m) => m.status !== "released" && m.status !== "refunded"
+  );
+
+  let released = 0;
+  let failed = 0;
+  let skipped = 0;
+
+  for (const milestone of pendingMilestones) {
+    const condition = milestone.releaseCondition;
+
+    // Guard: check whether this milestone's release condition is satisfied
+    if (condition === "manual") {
+      skipped++;
+      continue;
+    }
+    if (condition === "receipt_ready" && !receipt) {
+      skipped++;
+      continue;
+    }
+    if (
+      condition === "proof_verified" &&
+      receipt.status !== "verified"
+    ) {
+      // Log and skip — do not release if proof not verified
+      console.log(
+        `[Escrow] Milestone ${milestone.id} blocked: proof_verified required but receipt.status=${receipt.status}`
+      );
+      skipped++;
+      continue;
+    }
+
+    // Attempt release via provider
+    try {
+      const result = await provider.releaseMilestone({
+        escrowId: escrow.id,
+        milestoneId: milestone.id,
+        externalMilestoneId: milestone.externalMilestoneId ?? undefined,
+        receiptHash: receipt.receiptHash,
+      });
+
+      // Persist release result
+      await prisma.escrowMilestone.update({
+        where: { id: milestone.id },
+        data: {
+          status: result.status,
+          releaseTxHash: result.txHash ?? null,
+          receiptId: receipt.id,
+        },
+      });
+
+      // Record milestone_released trace event
+      await recordTraceEvent(
+        taskId,
+        "milestone_released",
+        "coordinator",
+        `Milestone released for specialist ${milestone.specialistId}: $${Number(milestone.amount).toFixed(2)} USDC${result.txHash ? ` (tx: ${result.txHash.slice(0, 10)}...)` : ""}`,
+        {
+          metadata: {
+            milestoneId: milestone.id,
+            specialistId: milestone.specialistId,
+            amount: Number(milestone.amount),
+            txHash: result.txHash,
+            receiptHash: receipt.receiptHash,
+            releaseCondition: condition,
+          },
+        }
+      ).catch(() => { /* trace write is non-fatal */ });
+
+      released++;
+    } catch (err) {
+      const error = err instanceof Error ? err.message : "Unknown error";
+      console.error(`[Escrow] releaseMilestone failed for ${milestone.id}:`, error);
+
+      // Persist failure state
+      await prisma.escrowMilestone.update({
+        where: { id: milestone.id },
+        data: { status: "failed" },
+      }).catch(() => { /* non-fatal */ });
+
+      // Record milestone_release_failed trace event
+      await recordTraceEvent(
+        taskId,
+        "milestone_release_failed",
+        "coordinator",
+        `Milestone release failed for specialist ${milestone.specialistId}: ${error}`,
+        {
+          metadata: {
+            milestoneId: milestone.id,
+            specialistId: milestone.specialistId,
+            error,
+            receiptHash: receipt.receiptHash,
+          },
+        }
+      ).catch(() => { /* trace write is non-fatal */ });
+
+      failed++;
+    }
+  }
+
+  // Update top-level escrow status when all milestones are settled
+  if (released + skipped === pendingMilestones.length && failed === 0) {
+    await prisma.escrow.update({
+      where: { id: escrow.id },
+      data: { status: "completed" },
+    }).catch(() => { /* non-fatal */ });
+  }
+
+  console.log(
+    `[Escrow] releaseEscrowMilestones task=${taskId}: released=${released} failed=${failed} skipped=${skipped}`
+  );
+
+  return { released, failed, skipped };
 }
 
 // ── DB queries ───────────────────────────────────────────────────────────────
