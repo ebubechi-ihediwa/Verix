@@ -129,3 +129,14 @@ See `contracts/soroban/README.md` for deploy and invocation commands.
 Trustless Work handles escrow creation, funding, milestone status, and release
 on Stellar/Soroban. Verix does not duplicate escrow contracts; it anchors agent
 and receipt trust metadata while using Trustless Work for settlement.
+
+## Hackathon Submission Docs
+
+- [Architecture](docs/architecture.md)
+- [Proof Architecture](docs/proof-architecture.md)
+- [Demo Script](docs/demo-script.md)
+- [Final Submission Checklist](docs/final-submission-checklist.md)
+
+The core proof claim is deliberately narrow: Verix proves workflow integrity,
+trace consistency, spend-cap compliance, receipt integrity, and payment summary
+correctness. It does not prove LLM inference.
