@@ -233,3 +233,80 @@ export async function getEscrowWithMilestones(taskId: string) {
     return null;
   }
 }
+
+/**
+ * Sync local escrow status with the external provider.
+ *
+ * Fetches the current escrow state from the provider and updates the local
+ * Escrow + EscrowMilestone rows to match. Returns the updated escrow record.
+ *
+ * In demo mode or when escrow is disabled, this is a no-op that returns
+ * the current local state without any external call.
+ */
+export async function syncEscrowStatus(escrowId: string): Promise<{
+  escrow: Awaited<ReturnType<typeof getEscrowWithMilestones>>;
+  synced: boolean;
+  error?: string;
+}> {
+  const escrow = await prisma.escrow.findUnique({
+    where: { id: escrowId },
+    include: { milestones: { orderBy: { createdAt: "asc" } } },
+  });
+
+  if (!escrow) {
+    return { escrow: null, synced: false, error: "Escrow not found" };
+  }
+
+  const provider = getEscrowProvider();
+
+  // Demo mode or disabled — return local state without external call
+  if (!provider || !escrow.externalId || escrow.externalId.startsWith("DEMO-")) {
+    return { escrow, synced: false };
+  }
+
+  try {
+    const remote = await provider.getEscrow(escrow.externalId);
+
+    // Map provider status to local EscrowStatus
+    const statusMap: Record<string, string> = {
+      pending: "pending",
+      funded: "funded",
+      in_progress: "in_progress",
+      completed: "completed",
+      cancelled: "cancelled",
+      disputed: "disputed",
+    };
+    const newStatus = statusMap[remote.status] ?? escrow.status;
+
+    await prisma.escrow.update({
+      where: { id: escrowId },
+      data: { status: newStatus },
+    });
+
+    // Sync milestone statuses if provider returned them
+    if (remote.milestones) {
+      for (const remoteMilestone of remote.milestones) {
+        const local = escrow.milestones.find(
+          (m) => m.externalMilestoneId === remoteMilestone.externalMilestoneId
+        );
+        if (local) {
+          await prisma.escrowMilestone.update({
+            where: { id: local.id },
+            data: { status: remoteMilestone.status },
+          }).catch(() => { /* non-fatal */ });
+        }
+      }
+    }
+
+    const updated = await prisma.escrow.findUnique({
+      where: { id: escrowId },
+      include: { milestones: { orderBy: { createdAt: "asc" } } },
+    });
+
+    return { escrow: updated, synced: true };
+  } catch (err) {
+    const error = err instanceof Error ? err.message : "Unknown sync error";
+    console.error(`[Escrow] syncEscrowStatus failed for ${escrowId}:`, error);
+    return { escrow, synced: false, error };
+  }
+}

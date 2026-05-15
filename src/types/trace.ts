@@ -11,7 +11,13 @@ export type TraceEventType =
   | "specialist_completed"
   | "specialist_failed"
   | "task_completed"
-  | "task_failed";
+  | "task_failed"
+  // Escrow lifecycle events (EPIC 4)
+  | "escrow_created"
+  | "escrow_funded"
+  | "escrow_sync_failed"
+  | "milestone_released"
+  | "milestone_release_failed";
 
 export interface ExecutionTraceEvent {
   id: string;
