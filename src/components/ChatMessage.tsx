@@ -518,7 +518,9 @@ function ResultCard({ result, taskId, receipt }: { result: TaskResult; taskId?: 
                             {/* Proof coverage note */}
                             {proof && (
                                 <p className="text-[9px] text-ink-muted mb-2.5 leading-relaxed">
-                                    {isVerified
+                                    {proof.journal?.verifierType === "demo-fallback"
+                                        ? "Demo fallback proof artifact. Verification is explicitly labeled and only valid for controlled demo mode."
+                                        : isVerified
                                         ? "This receipt is cryptographically attested: receipt integrity, spend cap compliance, payment correctness, and agent membership are all verified."
                                         : proof.status === "proven"
                                         ? "Proof generated. Click ‘Verify Proof’ to run integrity checks."

@@ -147,6 +147,10 @@ function buildEnv() {
      */
     TRUSTLESS_WORK_SIGNER_ADDRESS: process.env.TRUSTLESS_WORK_SIGNER_ADDRESS ?? process.env.TRUSTLESS_WORK_KEY_ID,
     TRUSTLESS_WORK_ESCROW_TYPE: (process.env.TRUSTLESS_WORK_ESCROW_TYPE ?? "multi-release") as "single-release" | "multi-release",
+    EXTERNAL_API_TIMEOUT_MS: Math.max(1000, parseInt(process.env.EXTERNAL_API_TIMEOUT_MS ?? "12000", 10) || 12000),
+    DEMO_FALLBACKS_ENABLED:
+      process.env.DEMO_FALLBACKS_ENABLED === "true" ||
+      (!process.env.DEMO_FALLBACKS_ENABLED && mode === "demo"),
 
     // ── Proof ─────────────────────────────────────────────────────────────────
 

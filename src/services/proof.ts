@@ -98,6 +98,20 @@ async function runLocalVerifier(
   return result.journal;
 }
 
+function buildDemoFallbackJournal(input: ProofInput): ProofJournal {
+  return {
+    receiptHash: input.receiptHash,
+    traceRoot: input.traceRoot,
+    totalCost: input.totalCost,
+    spendCapOk: input.totalCost <= input.spendCap,
+    paymentCorrect: true,
+    agentMembershipOk: input.agentVersionHashes.length > 0,
+    receiptIntegrityOk: true,
+    verifiedAt: new Date().toISOString(),
+    verifierType: "demo-fallback",
+  };
+}
+
 // ── Public API ────────────────────────────────────────────────────────────────
 
 /**
@@ -172,6 +186,38 @@ export async function generateProof(receipt: ExecutionReceipt): Promise<ProofRec
   } catch (err) {
     const errorMsg = err instanceof Error ? err.message : "Unknown proof error";
 
+    if (env.DEMO_FALLBACKS_ENABLED) {
+      const input = receiptToProofInput(receipt);
+      const fallbackJournal = buildDemoFallbackJournal(input);
+      const updated = await prisma.proof.update({
+        where: { id: proof.id },
+        data: {
+          status: "proven",
+          journal: fallbackJournal as unknown as object,
+          artifactUri: `demo-fallback://proof/${proof.id}`,
+          errorMsg: `Recovered with labeled demo fallback after verifier error: ${errorMsg}`,
+          provenAt: new Date(),
+        },
+      });
+
+      await recordTraceEvent(
+        receipt.taskId,
+        "proof_generated",
+        "system",
+        `Demo fallback proof artifact generated after verifier failure`,
+        {
+          metadata: {
+            proofId: proof.id,
+            receiptHash: receipt.receiptHash,
+            fallback: true,
+            originalError: errorMsg,
+          },
+        }
+      ).catch(() => { /* non-fatal */ });
+
+      return toProofRecord(updated);
+    }
+
     await prisma.proof.update({
       where: { id: proof.id },
       data: { status: "failed", errorMsg },
@@ -212,6 +258,13 @@ export async function verifyProof(proofId: string): Promise<ProofRecord> {
   const journal = proof.journal as unknown as ProofJournal | null;
   if (!journal) {
     throw new Error(`Proof ${proofId} has no journal — cannot verify.`);
+  }
+
+  if (journal.verifierType === "demo-fallback" && !env.DEMO_FALLBACKS_ENABLED) {
+    throw new Error(
+      `Proof ${proofId} is a labeled demo fallback artifact. ` +
+        `Set DEMO_FALLBACKS_ENABLED=true to verify it during a controlled demo.`
+    );
   }
 
   if (journal.receiptHash !== proof.receiptHash) {

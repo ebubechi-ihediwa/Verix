@@ -348,6 +348,12 @@ export default function ReceiptExplorerPage({
                   description="All agent version hashes are non-empty committed snapshots."
                 />
 
+                {journal.verifierType === "demo-fallback" && (
+                  <div className="mt-3 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
+                    Demo fallback proof artifact. This is explicitly labeled and should only be used when DEMO_FALLBACKS_ENABLED is active.
+                  </div>
+                )}
+
                 <div className="py-3 flex items-center gap-4 font-mono text-[10px] text-ink-muted">
                   <span>verifier: {journal.verifierType}</span>
                   <span>·</span>

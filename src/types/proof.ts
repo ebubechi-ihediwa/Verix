@@ -83,7 +83,7 @@ export interface ProofJournal {
   verifiedAt: string;
 
   /** Which verifier produced this journal. */
-  verifierType: "local";
+  verifierType: "local" | "demo-fallback";
 }
 
 // ── Proof lifecycle ───────────────────────────────────────────────────────────
