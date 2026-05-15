@@ -13,6 +13,7 @@ export type TraceEventType =
   | "specialist_completed"
   | "specialist_failed"
   | "task_completed"
+  | "result_approved"
   | "task_failed"
   // Escrow lifecycle events
   | "escrow_created"

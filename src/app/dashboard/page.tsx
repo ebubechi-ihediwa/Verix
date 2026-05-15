@@ -425,6 +425,11 @@ export default function Dashboard() {
             result: task.result,
             taskId: taskId ?? undefined,
             receipt: task.receipt ?? undefined,
+            walletAddress: task.walletAddress,
+            approvalStatus: task.approvalStatus,
+            approvedAt: task.approvedAt,
+            approvedByWallet: task.approvedByWallet,
+            approvalResultHash: task.approvalResultHash,
           });
           fetchWalletBalance();
           clearInterval(interval);
@@ -618,6 +623,11 @@ export default function Dashboard() {
           result: task.result,
           taskId: historicTaskId,
           receipt: task.receipt ?? undefined,
+          walletAddress: task.walletAddress,
+          approvalStatus: task.approvalStatus,
+          approvedAt: task.approvedAt,
+          approvedByWallet: task.approvedByWallet,
+          approvalResultHash: task.approvalResultHash,
         });
       }
 

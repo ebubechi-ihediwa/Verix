@@ -49,6 +49,8 @@ function milestoneSteps(ms: EscrowMilestone): Step[] {
 
 const releaseConditionLabel: Record<string, string> = {
   proof_verified: "Proof-gated",
+  user_approved: "Approval-gated",
+  proof_and_user_approved: "Proof + Approval",
   receipt_ready:  "Receipt-gated",
   manual:         "Manual",
   auto:           "Auto",

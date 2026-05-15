@@ -20,6 +20,8 @@ export type MilestoneStatus =
 
 export type ReleaseCondition =
   | "proof_verified"   // requires ExecutionReceipt.status === "verified"
+  | "user_approved"    // requires task result approval by payer wallet
+  | "proof_and_user_approved" // requires verified proof plus payer approval
   | "receipt_ready"    // requires ExecutionReceipt to exist (proof_ready or verified)
   | "manual"           // coordinator manually triggers release (demo fallback)
   | "auto";            // released immediately after specialist completes (demo mode)

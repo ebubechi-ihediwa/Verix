@@ -14,10 +14,15 @@ model Task {
   totalCost   Decimal?
   spendCap    Decimal?
   events      Json?    @default("[]")
+  walletAddress String?
   requestedSpecialistId      String?
   requestedSpecialistName    String?
   requestedAgentVersionId    String?
   requestedAgentVersionHash  String?
+  approvalStatus     String   @default("pending")
+  approvedAt         DateTime?
+  approvedByWallet   String?
+  approvalResultHash String?
   ownerId     String?
   createdAt   DateTime @default(now())
   completedAt DateTime?
@@ -304,7 +309,7 @@ model EscrowMilestone {
   amount               Decimal
   /// MilestoneStatus: pending | funded | in_progress | released | refunded | failed
   status               String    @default("pending")
-  /// ReleaseCondition: proof_verified | receipt_ready | manual | auto
+  /// ReleaseCondition: proof_verified | user_approved | proof_and_user_approved | receipt_ready | manual | auto
   releaseCondition     String    @default("auto")
   agentVersionId       String?
   agentVersionHash     String?

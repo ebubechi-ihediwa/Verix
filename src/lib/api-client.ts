@@ -80,6 +80,21 @@ export async function getTaskStatus(taskId: string): Promise<Task> {
   return request(`/api/tasks/${taskId}`);
 }
 
+export async function approveTaskResult(
+  taskId: string,
+  walletAddress: string
+): Promise<{
+  approvalStatus: "approved";
+  approvedAt: string;
+  approvedByWallet: string;
+  approvalResultHash: string;
+}> {
+  return authedRequest(`/api/tasks/${encodeURIComponent(taskId)}/approve`, {
+    method: "POST",
+    body: JSON.stringify({ walletAddress }),
+  });
+}
+
 export async function getSpecialists(): Promise<Specialist[]> {
   return request("/api/specialists");
 }

@@ -125,6 +125,7 @@ export async function createExecution(
     requestedSpecialistName: requestedSpecialist?.name,
     requestedAgentVersionId: requestedVersion?.id,
     requestedAgentVersionHash: requestedVersion?.versionHash,
+    approvalStatus: "pending",
     events: [],
     ownerId,
     createdAt: new Date().toISOString(),

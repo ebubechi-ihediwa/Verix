@@ -25,6 +25,10 @@ export interface Task {
   requestedSpecialistName?: string;
   requestedAgentVersionId?: string;
   requestedAgentVersionHash?: string;
+  approvalStatus?: "pending" | "approved";
+  approvedAt?: string;
+  approvedByWallet?: string;
+  approvalResultHash?: string;
   ownerId?: string;
   createdAt: string;
   completedAt?: string;

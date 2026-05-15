@@ -61,7 +61,7 @@ type PrepareEscrowResult = {
 };
 
 export function releaseConditionForProofPolicy(policy: string | undefined): ReleaseCondition {
-  if (policy === "escrow-eligible") return "proof_verified";
+  if (policy === "escrow-eligible") return "proof_and_user_approved";
   if (policy === "receipt-proof") return "receipt_ready";
   return "manual";
 }
@@ -493,6 +493,11 @@ export async function releaseEscrowMilestones(
   const pendingMilestones = escrow.milestones.filter(
     (m) => m.status !== "released" && m.status !== "refunded"
   );
+  const taskApproval = await prisma.task.findUnique({
+    where: { id: taskId },
+    select: { approvalStatus: true, approvedAt: true, approvedByWallet: true },
+  }).catch(() => null);
+  const isUserApproved = taskApproval?.approvalStatus === "approved";
 
   let released = 0;
   let failed = 0;
@@ -503,7 +508,21 @@ export async function releaseEscrowMilestones(
 
     if (condition === "manual") { skipped++; continue; }
     if (condition === "receipt_ready" && !receipt) { skipped++; continue; }
-    if (condition === "proof_verified" && receipt.status !== "verified") {
+    if (condition === "user_approved" && !isUserApproved) {
+      console.log(
+        `[Escrow] Milestone ${milestone.id} blocked: user approval required`
+      );
+      skipped++;
+      continue;
+    }
+    if (condition === "proof_and_user_approved" && !isUserApproved) {
+      console.log(
+        `[Escrow] Milestone ${milestone.id} blocked: proof plus user approval required but approval is missing`
+      );
+      skipped++;
+      continue;
+    }
+    if ((condition === "proof_verified" || condition === "proof_and_user_approved") && receipt.status !== "verified") {
       console.log(
         `[Escrow] Milestone ${milestone.id} blocked: proof_verified required but receipt.status=${receipt.status}`
       );
