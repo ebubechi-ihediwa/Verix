@@ -81,7 +81,15 @@ Expected demo flow:
    intents.
 4. Receipt generation commits to the input, agent versions, trace root, spend
    cap, outputs, and payout summary.
-5. Proof verification can unlock Trustless Work milestone release.
+5. The result card exposes approval, proof verification, escrow status, and
+   Trustless Work viewer links.
+6. Proof verification plus payer approval can unlock Trustless Work milestone
+   release.
+
+In the dashboard, use **Load demo flow** to prefill the canonical prompt and
+demo spend cap. In `ESCROW_MODE=demo`, escrow IDs and transaction hashes are
+clearly synthetic; in `ESCROW_MODE=live`, real Trustless Work viewer links are
+shown when external contract IDs are available.
 
 Reset only demo-owned task data:
 

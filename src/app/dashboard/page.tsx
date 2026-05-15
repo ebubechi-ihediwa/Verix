@@ -27,6 +27,7 @@ import {
   getWalletOptions,
   WalletProviderId,
 } from "@/lib/wallet-connect";
+import { DEMO_GOLDEN_PROMPT, DEMO_SPEND_CAP_USDC } from "@/lib/demo-scenario";
 
 // Pure helper — defined outside component so it is stable across renders
 function traceEventToThinkingStep(e: ExecutionTraceEvent): ThinkingStep {
@@ -974,6 +975,20 @@ export default function Dashboard() {
                 </button>
               </div>
             )}
+            <div className="mb-2 flex items-center justify-between gap-2 text-[10px] text-ink-muted">
+              <span>Golden path: marketplace hire &gt; escrow &gt; proof &gt; approval &gt; settlement</span>
+              <button
+                type="button"
+                onClick={() => {
+                  setInputValue(DEMO_GOLDEN_PROMPT);
+                  setSpendCap(DEMO_SPEND_CAP_USDC);
+                  inputRef.current?.focus();
+                }}
+                className="rounded border border-border px-2 py-1 font-medium text-ink hover:border-border-strong"
+              >
+                Load demo flow
+              </button>
+            </div>
             <div className="relative flex items-end gap-2 bg-surface border border-border rounded-md px-4 py-2 focus-within:border-border-strong transition-all">
               <textarea
                 ref={inputRef}

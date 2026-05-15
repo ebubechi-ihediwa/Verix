@@ -84,5 +84,7 @@ export const DEMO_EXPECTED_FLOW = [
   "Trace events are hash-chained into a trace root.",
   "A receipt commits to input, agent versions, trace root, spend cap, outputs, and payouts.",
   "The workflow verifier proves receipt integrity and spend/payment consistency.",
-  "Trustless Work milestones can be released after proof verification.",
+  "The payer approves the result before payout release.",
+  "Trustless Work milestones can be released after proof verification and approval.",
+  "Viewer links show live escrow records when Trustless Work is configured, or demo labels when ESCROW_MODE=demo.",
 ];
