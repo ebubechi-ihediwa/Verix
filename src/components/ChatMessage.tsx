@@ -352,6 +352,14 @@ function ResultCard({ result, taskId, receipt }: { result: TaskResult; taskId?: 
                                     View Trace →
                                 </Link>
                             )}
+                            {taskId && (
+                                <Link
+                                    href={`/receipts/${taskId}`}
+                                    className="text-[10px] font-medium text-emerald-600 hover:text-emerald-800 transition-colors underline underline-offset-2"
+                                >
+                                    View Receipt →
+                                </Link>
+                            )}
                         </div>
                     </div>
 

@@ -2,6 +2,7 @@ import { CreateTaskRequest, CreateTaskResponse, Task } from "@/types/task";
 import { Specialist, SpecialistProfile } from "@/types/specialist";
 import { WalletBalance } from "@/types/payment";
 import { ExecutionTraceEvent, ExecutionReceipt } from "@/types/trace";
+import { ProofRecord } from "@/types/proof";
 
 const API_URL = process.env.NEXT_PUBLIC_APP_URL || "";
 
@@ -152,4 +153,16 @@ export async function getExecutionTrace(taskId: string): Promise<{
 
 export async function getExecutionReceipt(taskId: string): Promise<ExecutionReceipt> {
   return request(`/api/executions/${encodeURIComponent(taskId)}/receipt`);
+}
+
+export async function getProofByTask(taskId: string): Promise<ProofRecord> {
+  return request(`/api/proofs?taskId=${encodeURIComponent(taskId)}`);
+}
+
+export async function getProof(proofId: string): Promise<ProofRecord> {
+  return request(`/api/proofs/${encodeURIComponent(proofId)}`);
+}
+
+export async function verifyProof(proofId: string): Promise<ProofRecord> {
+  return request(`/api/proofs/${encodeURIComponent(proofId)}/verify`, { method: "POST" });
 }
