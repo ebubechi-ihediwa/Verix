@@ -20,6 +20,26 @@ import {
 } from "@/lib/api-client";
 import { Specialist } from "@/types/specialist";
 
+// Pure helper — defined outside component so it is stable across renders
+function traceEventToThinkingStep(e: ExecutionTraceEvent): ThinkingStep {
+  const deriveStatus = (type: string): ThinkingStep["status"] => {
+    if (type.includes("failed") || type.includes("exceeded")) return "error";
+    if (type.includes("confirmed") || type.includes("completed")) return "success";
+    if (type.includes("initiated") || type.includes("invoked") || type.includes("assigned")) return "pending";
+    return "info";
+  };
+  return {
+    message: e.displayMessage,
+    status: deriveStatus(e.eventType),
+    type: e.actor === "payment" ? "payment" : e.actor === "coordinator" ? "coordinator" : "specialist",
+    timestamp: e.timestamp,
+    actor: e.actor,
+    eventType: e.eventType,
+    eventHash: e.eventHash,
+    sequence: e.sequence,
+  };
+}
+
 export default function Dashboard() {
   // Core state
   const [taskStatus, setTaskStatus] = useState<TaskStatus | null>(null);
@@ -65,25 +85,8 @@ export default function Dashboard() {
   // Server event tracking
   const syncedEventsCount = useRef(0);
 
-  // Map a structured trace event to a ThinkingStep
-  const traceEventToThinkingStep = (e: ExecutionTraceEvent): ThinkingStep => {
-    const deriveStatus = (type: string): ThinkingStep["status"] => {
-      if (type.includes("failed") || type.includes("exceeded")) return "error";
-      if (type.includes("confirmed") || type.includes("completed")) return "success";
-      if (type.includes("initiated") || type.includes("invoked") || type.includes("assigned")) return "pending";
-      return "info";
-    };
-    return {
-      message: e.displayMessage,
-      status: deriveStatus(e.eventType),
-      type: e.actor === "payment" ? "payment" : e.actor === "coordinator" ? "coordinator" : "specialist",
-      timestamp: e.timestamp,
-      actor: e.actor,
-      eventType: e.eventType,
-      eventHash: e.eventHash,
-      sequence: e.sequence,
-    };
-  };
+  // SSE connection for live trace events
+  const sseRef = useRef<EventSource | null>(null);
 
   // Scroll to bottom when messages change
   useEffect(() => {
@@ -241,6 +244,48 @@ export default function Dashboard() {
     return () => clearInterval(interval);
   }, [taskStatus]);
 
+  // SSE subscription — streams trace events with ~1s latency while a task is active.
+  // The existing 2s polling useEffect remains active as fallback: syncTraceEvents
+  // checks syncedEventsCount so events processed by SSE are not re-added.
+  useEffect(() => {
+    if (!taskId) return;
+
+    const sse = new EventSource(`/api/executions/${encodeURIComponent(taskId)}/events`);
+    sseRef.current = sse;
+
+    sse.onmessage = (e) => {
+      try {
+        const msg = JSON.parse(e.data) as { type: string; payload: unknown };
+        if (msg.type === "trace_event") {
+          const event = msg.payload as ExecutionTraceEvent;
+          if (event.sequence >= syncedEventsCount.current) {
+            addThinkingStep(traceEventToThinkingStep(event));
+            syncedEventsCount.current = event.sequence + 1;
+            setGraphEvents((prev) => {
+              if (prev.some((ev) => ev.sequence === event.sequence)) return prev;
+              return [...prev, event].sort((a, b) => a.sequence - b.sequence);
+            });
+          }
+        } else if (msg.type === "task_complete") {
+          sse.close();
+          sseRef.current = null;
+        }
+      } catch {
+        // ignore malformed messages
+      }
+    };
+
+    sse.onerror = () => {
+      sse.close();
+      sseRef.current = null;
+    };
+
+    return () => {
+      sse.close();
+      sseRef.current = null;
+    };
+  }, [taskId, addThinkingStep]);
+
   // Estimate cost
   const estimateCost = (description: string) => {
     const lower = description.toLowerCase();
@@ -341,6 +386,8 @@ export default function Dashboard() {
     setElapsedTime(0);
     setGraphEvents([]);
     syncedEventsCount.current = 0;
+    sseRef.current?.close();
+    sseRef.current = null;
 
     // Create thinking block
     const thinkingId = crypto.randomUUID();
@@ -493,6 +540,8 @@ export default function Dashboard() {
     setInputValue("");
     syncedEventsCount.current = 0;
     thinkingIdRef.current = null;
+    sseRef.current?.close();
+    sseRef.current = null;
     fetchWalletBalance();
     fetchHistory();
     setSidebarOpen(false);
@@ -650,7 +699,7 @@ export default function Dashboard() {
           {!hasMessages ? (
             /* Empty state — welcome screen */
             <div className="flex flex-col items-center justify-center h-full px-6 py-12">
-              <div className="w-16 h-16 rounded-2xl bg-gradient-to-br from-indigo-100 to-violet-100 flex items-center justify-center mb-6">
+              <div className="w-16 h-16 rounded-2xl bg-linear-to-br from-indigo-100 to-violet-100 flex items-center justify-center mb-6">
                 <span className="text-3xl">◈</span>
               </div>
               <h1 className="text-2xl font-bold text-ink mb-2">
