@@ -16,7 +16,9 @@ export type TraceEventType =
   | "task_failed"
   // Escrow lifecycle events
   | "escrow_created"
+  | "escrow_funding_pending"
   | "escrow_funded"
+  | "escrow_signature_submitted"
   | "escrow_creation_failed"
   | "escrow_funding_failed"
   | "escrow_sync_failed"

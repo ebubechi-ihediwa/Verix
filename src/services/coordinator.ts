@@ -561,6 +561,10 @@ export async function executeCoordinator(
         `Escrow prepared: ${escrow.milestoneCount} milestone(s), $${escrow.totalAmount.toFixed(2)} USDC${escrow.externalId ? ` (${escrow.externalId})` : ""}.`,
         escrow.status === "funded" ? "success" : "pending"
       );
+      if (escrow.status === "funding_pending") {
+        await updateExecution(taskId, { status: "funding_pending" });
+        return;
+      }
     }
   } catch (error) {
     const message = error instanceof Error ? error.message : "Unknown escrow preparation error";

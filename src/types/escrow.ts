@@ -2,6 +2,8 @@
 
 export type EscrowStatus =
   | "pending"      // created locally, not yet on-chain
+  | "funding_pending" // unsigned funding transaction is waiting for payer signature
+  | "funding_failed"  // wallet signing or provider submission failed
   | "funded"       // escrow funded on-chain
   | "in_progress"  // work underway
   | "completed"    // all milestones released
@@ -76,6 +78,8 @@ export interface CreateEscrowResult {
   externalId: string;
   status: EscrowStatus;
   txHash?: string;
+  unsignedTransaction?: string;
+  requiresSignature?: boolean;
 }
 
 export interface FundEscrowInput {
@@ -85,6 +89,17 @@ export interface FundEscrowInput {
 }
 
 export interface FundEscrowResult {
+  status: EscrowStatus;
+  txHash?: string;
+  unsignedTransaction?: string;
+  requiresSignature?: boolean;
+}
+
+export type EscrowSignaturePhase = "create" | "fund";
+
+export interface SubmitSignedEscrowTransactionResult {
+  escrowId: string;
+  phase: EscrowSignaturePhase;
   status: EscrowStatus;
   txHash?: string;
 }
@@ -119,6 +134,9 @@ export interface GetEscrowResult {
 export interface EscrowProvider {
   createEscrow(input: CreateEscrowInput): Promise<CreateEscrowResult>;
   fundEscrow(input: FundEscrowInput): Promise<FundEscrowResult>;
+  submitSignedTransaction?(
+    signedXdr: string
+  ): Promise<{ txHash?: string; hash?: string }>;
   getEscrow(externalId: string): Promise<GetEscrowResult>;
   releaseMilestone(input: ReleaseMilestoneInput): Promise<ReleaseMilestoneResult>;
   cancelEscrow?(externalId: string): Promise<void>;

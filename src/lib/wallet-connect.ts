@@ -127,6 +127,23 @@ export async function connectWallet(providerId?: WalletProviderId): Promise<Conn
   return wallet;
 }
 
+export async function signWalletTransaction(
+  xdr: string,
+  address: string,
+  networkPassphrase?: string
+): Promise<{ signedTxXdr: string; signerAddress?: string }> {
+  initKit();
+
+  if (!address?.startsWith("G")) {
+    throw new Error("A connected Stellar wallet is required to sign escrow funding.");
+  }
+
+  return StellarWalletsKit.signTransaction(xdr, {
+    address,
+    networkPassphrase: networkPassphrase ?? Networks.TESTNET,
+  });
+}
+
 export function disposeWalletKitListeners() {
   unsubscribeWalletSelected?.();
   unsubscribeWalletSelected = undefined;

@@ -22,6 +22,7 @@ import { prisma } from "@/lib/db";
 
 export type JobType =
   | "coordinator_execution"
+  | "coordinator_execution_resume"
   | "proof_generation"
   | "escrow_sync";
 

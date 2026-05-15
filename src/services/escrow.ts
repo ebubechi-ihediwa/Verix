@@ -33,6 +33,9 @@ import {
   ReleaseMilestoneInput,
   ReleaseMilestoneResult,
   ReleaseCondition,
+  EscrowSignaturePhase,
+  SubmitSignedEscrowTransactionResult,
+  EscrowStatus,
 } from "@/types/escrow";
 
 type EscrowMilestonePlan = {
@@ -142,11 +145,18 @@ class TrustlessWorkAdapter implements EscrowProvider {
   private baseUrl: string;
   private apiKey: string;
   private signerAddress: string;
+  private signingMode: "server" | "wallet";
 
-  constructor(baseUrl: string, apiKey: string, signerAddress: string) {
+  constructor(
+    baseUrl: string,
+    apiKey: string,
+    signerAddress: string,
+    signingMode: "server" | "wallet"
+  ) {
     this.baseUrl = baseUrl.replace(/\/$/, "");
     this.apiKey = apiKey;
     this.signerAddress = signerAddress;
+    this.signingMode = signingMode;
   }
 
   private async request<T>(
@@ -177,16 +187,20 @@ class TrustlessWorkAdapter implements EscrowProvider {
 
   private async sendTransaction(unsignedTransaction: string): Promise<string | undefined> {
     try {
-      const result = await this.request<{ txHash?: string; hash?: string }>(
-        "POST",
-        "/helper/send-transaction",
-        { signedXdr: unsignedTransaction, unsignedTransaction }
-      );
+      const result = await this.submitSignedTransaction(unsignedTransaction);
       return result.txHash ?? result.hash;
     } catch (err) {
       console.warn("[TrustlessWork] send-transaction failed:", err);
       return undefined;
     }
+  }
+
+  async submitSignedTransaction(signedXdr: string): Promise<{ txHash?: string; hash?: string }> {
+    return this.request<{ txHash?: string; hash?: string }>(
+      "POST",
+      "/helper/send-transaction",
+      { signedXdr, unsignedTransaction: signedXdr }
+    );
   }
 
   async createEscrow(input: CreateEscrowInput): Promise<CreateEscrowResult> {
@@ -230,6 +244,14 @@ class TrustlessWorkAdapter implements EscrowProvider {
 
     let txHash: string | undefined;
     if (data.unsignedTransaction) {
+      if (this.signingMode === "wallet") {
+        return {
+          externalId: data.id ?? `TW-ESC-${input.taskId.slice(0, 8)}`,
+          status: "pending",
+          unsignedTransaction: data.unsignedTransaction,
+          requiresSignature: true,
+        };
+      }
       txHash = await this.sendTransaction(data.unsignedTransaction);
     }
 
@@ -249,6 +271,13 @@ class TrustlessWorkAdapter implements EscrowProvider {
 
     let txHash: string | undefined;
     if (data.unsignedTransaction) {
+      if (this.signingMode === "wallet") {
+        return {
+          status: "funding_pending",
+          unsignedTransaction: data.unsignedTransaction,
+          requiresSignature: true,
+        };
+      }
       txHash = await this.sendTransaction(data.unsignedTransaction);
     }
 
@@ -326,7 +355,8 @@ export function getEscrowProvider(): EscrowProvider | null {
   _provider = new TrustlessWorkAdapter(
     env.TRUSTLESS_WORK_API_URL,
     env.TRUSTLESS_WORK_API_KEY,
-    signerAddress
+    signerAddress,
+    env.TRUSTLESS_WORK_SIGNING_MODE
   );
   return _provider;
 }
@@ -357,6 +387,80 @@ export async function releaseMilestone(
   const provider = getEscrowProvider();
   if (!provider) throw new Error("[escrow] Escrow is disabled (ESCROW_MODE=disabled).");
   return provider.releaseMilestone(input);
+}
+
+export async function submitSignedEscrowTransaction(
+  escrowId: string,
+  signedXdr: string,
+  phase: EscrowSignaturePhase
+): Promise<SubmitSignedEscrowTransactionResult> {
+  const provider = getEscrowProvider();
+  if (!provider?.submitSignedTransaction) {
+    throw new Error("[escrow] Current escrow provider does not support signed transaction submission.");
+  }
+
+  const escrow = await prisma.escrow.findUnique({
+    where: { id: escrowId },
+    include: { milestones: true },
+  });
+  if (!escrow) throw new Error("Escrow not found");
+
+  const result = await provider.submitSignedTransaction(signedXdr);
+  const txHash = result.txHash ?? result.hash;
+  const metadata = (escrow.metadata ?? {}) as Record<string, unknown>;
+  let nextStatus: EscrowStatus = phase === "fund" ? "funded" : escrow.status as EscrowStatus;
+  const nextMetadata = {
+    ...metadata,
+    ...(phase === "create"
+      ? { createTxHash: txHash, createSignedAt: new Date().toISOString() }
+      : { fundTxHash: txHash, fundingSignedAt: new Date().toISOString() }),
+    lastSignedPhase: phase,
+  };
+
+  if (phase === "create" && provider.fundEscrow && escrow.externalId) {
+    const funding = await provider.fundEscrow({
+      escrowId,
+      externalId: escrow.externalId,
+      amount: Number(escrow.totalAmount),
+    });
+    nextStatus = funding.status;
+    Object.assign(nextMetadata, {
+      unsignedFundTransaction: funding.unsignedTransaction,
+      fundTxHash: funding.txHash,
+      fundingPreparedAt: new Date().toISOString(),
+    });
+  }
+
+  await prisma.escrow.update({
+    where: { id: escrowId },
+    data: { status: nextStatus, metadata: nextMetadata },
+  });
+
+  if (phase === "fund") {
+    await prisma.escrowMilestone.updateMany({
+      where: { escrowId },
+      data: { status: "funded" },
+    });
+  }
+
+  await recordTraceEvent(
+    escrow.taskId,
+    phase === "fund" ? "escrow_funded" : "escrow_signature_submitted",
+    "coordinator",
+    phase === "fund"
+      ? `Escrow funded from wallet signature${txHash ? ` (tx: ${txHash.slice(0, 10)}...)` : ""}`
+      : `Escrow deployment signature submitted${txHash ? ` (tx: ${txHash.slice(0, 10)}...)` : ""}`,
+    {
+      metadata: {
+        escrowId,
+        externalId: escrow.externalId,
+        phase,
+        txHash,
+      },
+    }
+  ).catch(() => { /* non-fatal */ });
+
+  return { escrowId, phase, status: nextStatus, txHash };
 }
 
 // ── Proof-gated milestone release ─────────────────────────────────────────────
@@ -519,6 +623,7 @@ export async function syncEscrowStatus(escrowId: string): Promise<{
     const remote = await provider.getEscrow(escrow.externalId);
 
     const statusMap: Record<string, string> = {
+      funding_pending: "funding_pending", funding_failed: "funding_failed",
       pending: "pending", funded: "funded", in_progress: "in_progress",
       completed: "completed", cancelled: "cancelled", disputed: "disputed",
     };
@@ -639,16 +744,20 @@ export async function prepareEscrowForExecution(input: {
 
     let finalStatus = created.status;
     let fundTxHash: string | undefined;
+    let unsignedCreateTransaction = created.unsignedTransaction;
+    let unsignedFundTransaction: string | undefined;
 
     await prisma.escrow.update({
       where: { id: escrow.id },
       data: {
         externalId: created.externalId,
-        status: finalStatus,
+        status: created.requiresSignature ? "funding_pending" : finalStatus,
         metadata: {
           mode: env.ESCROW_MODE,
+          signingMode: env.TRUSTLESS_WORK_SIGNING_MODE,
           milestoneCount: milestonePlan.length,
           createTxHash: created.txHash,
+          unsignedCreateTransaction,
         },
       },
     });
@@ -665,12 +774,15 @@ export async function prepareEscrowForExecution(input: {
           milestoneCount: milestonePlan.length,
           payerAddress: input.payerAddress,
           txHash: created.txHash,
+          requiresSignature: created.requiresSignature,
           mode: env.ESCROW_MODE,
         },
       }
     ).catch(() => { /* non-fatal */ });
 
-    if (created.status !== "funded") {
+    if (created.requiresSignature && unsignedCreateTransaction) {
+      finalStatus = "funding_pending";
+    } else if (created.status !== "funded") {
       try {
         failurePhase = "fund";
         const funded = await provider.fundEscrow({
@@ -680,14 +792,16 @@ export async function prepareEscrowForExecution(input: {
         });
         finalStatus = funded.status;
         fundTxHash = funded.txHash;
+        unsignedFundTransaction = funded.unsignedTransaction;
       } catch (error) {
         const message = error instanceof Error ? error.message : "Unknown escrow funding error";
         await prisma.escrow.update({
           where: { id: escrow.id },
           data: {
-            status: "pending",
+            status: "funding_failed",
             metadata: {
               mode: env.ESCROW_MODE,
+              signingMode: env.TRUSTLESS_WORK_SIGNING_MODE,
               milestoneCount: milestonePlan.length,
               createTxHash: created.txHash,
               fundingError: message,
@@ -696,7 +810,7 @@ export async function prepareEscrowForExecution(input: {
         });
         await prisma.escrowMilestone.updateMany({
           where: { escrowId: escrow.id },
-          data: { status: "failed" },
+          data: { status: "pending" },
         });
         await recordTraceEvent(
           input.taskId,
@@ -715,9 +829,12 @@ export async function prepareEscrowForExecution(input: {
         status: finalStatus,
         metadata: {
           mode: env.ESCROW_MODE,
+          signingMode: env.TRUSTLESS_WORK_SIGNING_MODE,
           milestoneCount: milestonePlan.length,
           createTxHash: created.txHash,
           fundTxHash,
+          unsignedCreateTransaction,
+          unsignedFundTransaction,
         },
       },
     });
@@ -738,6 +855,23 @@ export async function prepareEscrowForExecution(input: {
             externalId: created.externalId,
             totalAmount,
             txHash: fundTxHash ?? created.txHash,
+          },
+        }
+      ).catch(() => { /* non-fatal */ });
+    } else if (finalStatus === "funding_pending") {
+      await recordTraceEvent(
+        input.taskId,
+        "escrow_funding_pending",
+        "coordinator",
+        `Escrow is waiting for wallet signature before agent execution can start`,
+        {
+          metadata: {
+            escrowId: escrow.id,
+            externalId: created.externalId,
+            totalAmount,
+            payerAddress: input.payerAddress,
+            requiresCreateSignature: Boolean(unsignedCreateTransaction),
+            requiresFundSignature: Boolean(unsignedFundTransaction),
           },
         }
       ).catch(() => { /* non-fatal */ });

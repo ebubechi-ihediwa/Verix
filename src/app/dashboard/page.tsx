@@ -669,6 +669,7 @@ export default function Dashboard() {
   // Status labels
   const statusLabels: Record<TaskStatus, string> = {
     pending: "Pending",
+    funding_pending: "Awaiting Escrow Funding",
     decomposing: "Decomposing Task",
     discovering: "Finding Specialists",
     processing: "Processing",

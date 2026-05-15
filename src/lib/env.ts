@@ -149,6 +149,7 @@ function buildEnv() {
      */
     TRUSTLESS_WORK_SIGNER_ADDRESS: process.env.TRUSTLESS_WORK_SIGNER_ADDRESS ?? process.env.TRUSTLESS_WORK_KEY_ID,
     TRUSTLESS_WORK_ESCROW_TYPE: (process.env.TRUSTLESS_WORK_ESCROW_TYPE ?? "multi-release") as "single-release" | "multi-release",
+    TRUSTLESS_WORK_SIGNING_MODE: (process.env.TRUSTLESS_WORK_SIGNING_MODE ?? "server") as "server" | "wallet",
 
     // ── Proof ─────────────────────────────────────────────────────────────────
 

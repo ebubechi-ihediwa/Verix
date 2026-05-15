@@ -2,6 +2,7 @@ import type { ExecutionTraceEvent, ExecutionReceipt } from "@/types/trace";
 
 export type TaskStatus =
   | "pending"
+  | "funding_pending"
   | "decomposing"
   | "discovering"
   | "processing"

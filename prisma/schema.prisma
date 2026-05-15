@@ -262,13 +262,13 @@ model Job {
  * externalId is the Trustless Work escrow ID (null in demo mode uses DEMO- prefix).
  * Each subtask maps to one EscrowMilestone.
  *
- * EscrowStatus: pending | funded | in_progress | completed | cancelled | disputed
+ * EscrowStatus: pending | funding_pending | funding_failed | funded | in_progress | completed | cancelled | disputed
  */
 model Escrow {
   id             String    @id @default(cuid())
   taskId         String    @unique
   externalId     String?
-  /// EscrowStatus: pending | funded | in_progress | completed | cancelled | disputed
+  /// EscrowStatus: pending | funding_pending | funding_failed | funded | in_progress | completed | cancelled | disputed
   status         String    @default("pending")
   totalAmount    Decimal
   currency       String    @default("USDC")

@@ -11,6 +11,7 @@ import {
   completeJob,
   enqueueJob,
   failJob,
+  JobType,
   startJob,
 } from "@/services/jobs";
 import { getActiveAgentVersion, getSpecialistById } from "@/services/discovery";
@@ -31,6 +32,7 @@ const DEFAULT_SPEND_CAP = 50;
 const ALLOWED_TRANSITIONS: ExecutionTransition[] = [
   { from: ["pending"], to: "decomposing" },
   { from: ["decomposing"], to: "discovering" },
+  { from: ["funding_pending"], to: "discovering" },
   { from: ["discovering"], to: "processing" },
   { from: ["decomposing", "discovering", "processing"], to: "failed" },
   { from: ["processing"], to: "completed" },
@@ -153,7 +155,8 @@ export async function createExecution(
  */
 export async function startExecution(
   task: Task,
-  runner: (taskId: string, description: string, spendCap?: number, walletAddress?: string, requestedSpecialistId?: string) => Promise<void>
+  runner: (taskId: string, description: string, spendCap?: number, walletAddress?: string, requestedSpecialistId?: string) => Promise<void>,
+  jobType: JobType = "coordinator_execution"
 ): Promise<string> {
   const payload: Record<string, unknown> = {
     taskId: task.id,
@@ -164,7 +167,7 @@ export async function startExecution(
   };
 
   // Enqueue is idempotent: returns existing non-failed job if one exists
-  const job = await enqueueJob("coordinator_execution", payload, task.id);
+  const job = await enqueueJob(jobType, payload, task.id);
 
   // If the job is already running or done, another caller got there first
   if (job.status === "running" || job.status === "completed") {

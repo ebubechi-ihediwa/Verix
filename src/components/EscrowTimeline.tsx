@@ -2,8 +2,9 @@
 
 import { useEffect, useState } from "react";
 import { motion } from "framer-motion";
-import { getEscrowByTask } from "@/lib/api-client";
-import { Escrow, EscrowMilestone, MilestoneStatus } from "@/types/escrow";
+import { getEscrowByTask, submitSignedEscrowTransaction } from "@/lib/api-client";
+import { getAuthorizedWallet, signWalletTransaction } from "@/lib/wallet-connect";
+import { Escrow, EscrowMilestone, EscrowSignaturePhase } from "@/types/escrow";
 
 interface EscrowTimelineProps {
   taskId: string;
@@ -121,6 +122,8 @@ function MilestoneRow({ ms }: { ms: EscrowMilestone }) {
 
 const escrowStatusLabel: Record<string, string> = {
   pending:     "Pending",
+  funding_pending: "Funding Pending",
+  funding_failed:  "Funding Failed",
   funded:      "Funded",
   in_progress: "In Progress",
   completed:   "Completed",
@@ -130,6 +133,8 @@ const escrowStatusLabel: Record<string, string> = {
 
 const escrowStatusStyle: Record<string, string> = {
   pending:     "bg-surface-tertiary text-ink-muted",
+  funding_pending: "bg-amber-50 text-amber-700 border border-amber-200",
+  funding_failed:  "bg-red-50 text-red-600 border border-red-200",
   funded:      "bg-indigo-50 text-indigo-700 border border-indigo-200",
   in_progress: "bg-amber-50 text-amber-700 border border-amber-200",
   completed:   "bg-emerald-50 text-emerald-700 border border-emerald-200",
@@ -140,6 +145,19 @@ const escrowStatusStyle: Record<string, string> = {
 export default function EscrowTimeline({ taskId }: EscrowTimelineProps) {
   const [escrow, setEscrow] = useState<(Escrow & { milestones: EscrowMilestone[] }) | null>(null);
   const [loading, setLoading] = useState(true);
+  const [signingState, setSigningState] = useState<"idle" | "signing" | "submitted" | "failed">("idle");
+  const [signingError, setSigningError] = useState<string | null>(null);
+
+  async function loadEscrow(cancelled = false) {
+    try {
+      const data = await getEscrowByTask(taskId);
+      if (!cancelled) setEscrow(data.escrow);
+    } catch {
+      // escrow may not exist - silently ignore
+    } finally {
+      if (!cancelled) setLoading(false);
+    }
+  }
 
   useEffect(() => {
     let cancelled = false;
@@ -158,6 +176,49 @@ export default function EscrowTimeline({ taskId }: EscrowTimelineProps) {
   }, [taskId]);
 
   if (loading || !escrow) return null;
+
+  const metadata = (escrow.metadata ?? {}) as Record<string, unknown>;
+  const createXdr = typeof metadata.unsignedCreateTransaction === "string"
+    ? metadata.unsignedCreateTransaction
+    : "";
+  const fundXdr = typeof metadata.unsignedFundTransaction === "string"
+    ? metadata.unsignedFundTransaction
+    : "";
+  const signaturePhase: EscrowSignaturePhase | null = fundXdr ? "fund" : createXdr ? "create" : null;
+  const unsignedXdr = fundXdr || createXdr;
+  const canSign = escrow.status === "funding_pending" && Boolean(signaturePhase && unsignedXdr);
+
+  async function handleSignEscrow() {
+    if (!escrow || !signaturePhase || !unsignedXdr) return;
+    const currentEscrow = escrow;
+    setSigningState("signing");
+    setSigningError(null);
+
+    try {
+      const wallet = await getAuthorizedWallet();
+      if (!wallet) throw new Error("Reconnect your Stellar wallet before signing escrow funding.");
+      if (wallet.address !== currentEscrow.payerAddress) {
+        throw new Error("Connected wallet does not match the task payer wallet.");
+      }
+
+      const signed = await signWalletTransaction(
+        unsignedXdr,
+        wallet.address,
+        wallet.networkPassphrase
+      );
+      setSigningState("submitted");
+      await submitSignedEscrowTransaction(currentEscrow.id, {
+        signedXdr: signed.signedTxXdr,
+        phase: signaturePhase,
+        signerAddress: signed.signerAddress ?? wallet.address,
+      });
+      await loadEscrow(false);
+      setSigningState("idle");
+    } catch (error) {
+      setSigningState("failed");
+      setSigningError(error instanceof Error ? error.message : "Wallet signing failed.");
+    }
+  }
 
   return (
     <motion.div
@@ -183,6 +244,50 @@ export default function EscrowTimeline({ taskId }: EscrowTimelineProps) {
         <span className="text-ink-muted">Total locked</span>
         <span className="font-mono font-semibold text-ink">${escrow.totalAmount.toFixed(2)} USDC</span>
       </div>
+
+      {canSign && (
+        <div className="px-4 py-3 border-b border-border bg-amber-50/40">
+          <div className="flex items-start justify-between gap-3">
+            <div className="min-w-0">
+              <p className="text-xs font-semibold text-ink">Wallet signature required</p>
+              <p className="mt-1 text-[11px] text-ink-muted">
+                Review and sign the Trustless Work {signaturePhase === "create" ? "deployment" : "funding"} transaction before agent execution proceeds.
+              </p>
+            </div>
+            <button
+              type="button"
+              onClick={handleSignEscrow}
+              disabled={signingState === "signing" || signingState === "submitted"}
+              className="shrink-0 rounded-md border border-ink bg-ink px-2.5 py-1.5 text-[11px] font-medium text-white disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              {signingState === "signing"
+                ? "Signing..."
+                : signingState === "submitted"
+                  ? "Submitting..."
+                  : signaturePhase === "create"
+                    ? "Sign deploy"
+                    : "Sign funding"}
+            </button>
+          </div>
+          <div className="mt-3 grid gap-1.5 text-[10px]">
+            <div className="flex justify-between gap-3">
+              <span className="text-ink-muted">Payer</span>
+              <span className="font-mono text-ink truncate">{escrow.payerAddress}</span>
+            </div>
+            {escrow.milestones.slice(0, 3).map((ms) => (
+              <div key={ms.id} className="flex justify-between gap-3">
+                <span className="text-ink-muted truncate">{ms.specialistId}</span>
+                <span className="font-mono text-ink truncate">
+                  ${ms.amount.toFixed(2)} -&gt; {ms.recipientAddress.slice(0, 8)}...{ms.recipientAddress.slice(-6)}
+                </span>
+              </div>
+            ))}
+          </div>
+          {signingError && (
+            <p className="mt-2 text-[10px] text-red-600">{signingError}</p>
+          )}
+        </div>
+      )}
 
       {/* Milestones */}
       <div className="px-4">
