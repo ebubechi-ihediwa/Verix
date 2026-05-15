@@ -11,7 +11,7 @@ import {
 } from "@/services/execution";
 import { createPayment } from "@/services/payment";
 import { Payment } from "@/types/payment";
-import { getEscrowProvider } from "@/services/escrow";
+import { getEscrowProvider, releaseEscrowMilestones } from "@/services/escrow";
 import { prisma } from "@/lib/db";
 import {
   getSpecialistSummariesForRouting,
@@ -356,6 +356,9 @@ export async function executeCoordinator(
     .map((s) => s.agentVersionId)
     .filter((id): id is string => Boolean(id));
 
+  // ── RECEIPT + ESCROW RELEASE ─────────────────────────────────────────────
+  // Chain receipt generation → milestone release so milestones are gated on
+  // the receipt existing. Release is non-fatal: failures surface as trace events.
   generateReceipt({
     taskId,
     description,
@@ -364,7 +367,11 @@ export async function executeCoordinator(
     agentVersionIds,
     resultSummary,
     paymentBreakdown,
-  }).catch((e) => console.warn("[Receipt] generateReceipt failed:", e));
+  }).then((receipt) => {
+    if (getEscrowProvider()) {
+      return releaseEscrowMilestones(taskId, receipt);
+    }
+  }).catch((e) => console.warn("[Receipt/Escrow] post-completion release failed:", e));
 
   console.log(`[Coordinator] Task ${taskId} completed. Total spent: $${totalSpent.toFixed(2)} USDC`);
 }
