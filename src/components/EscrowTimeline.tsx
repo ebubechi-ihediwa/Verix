@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { motion } from "framer-motion";
-import { getEscrowByTask, submitSignedEscrowTransaction } from "@/lib/api-client";
+import { getEscrowByTask, retryEscrowRelease, submitSignedEscrowTransaction, syncEscrowStatus } from "@/lib/api-client";
 import { getAuthorizedWallet, signWalletTransaction } from "@/lib/wallet-connect";
 import { stellarTxExplorerUrl } from "@/lib/stellar-config";
 import { isDemoEscrowId, trustlessWorkEscrowViewerUrl } from "@/lib/trustless-work";
@@ -151,6 +151,9 @@ export default function EscrowTimeline({ taskId }: EscrowTimelineProps) {
   const [loading, setLoading] = useState(true);
   const [signingState, setSigningState] = useState<"idle" | "signing" | "submitted" | "failed">("idle");
   const [signingError, setSigningError] = useState<string | null>(null);
+  const [syncing, setSyncing] = useState(false);
+  const [syncStatus, setSyncStatus] = useState<{ at?: string; error?: string; synced?: boolean } | null>(null);
+  const [retryingRelease, setRetryingRelease] = useState(false);
 
   async function loadEscrow(cancelled = false) {
     try {
@@ -230,6 +233,46 @@ export default function EscrowTimeline({ taskId }: EscrowTimelineProps) {
     }
   }
 
+  async function handleSyncEscrow() {
+    if (!escrow) return;
+    setSyncing(true);
+    try {
+      const result = await syncEscrowStatus(escrow.id);
+      setSyncStatus({
+        at: new Date().toISOString(),
+        synced: result.synced,
+        error: result.error ?? undefined,
+      });
+      await loadEscrow(false);
+    } catch (error) {
+      setSyncStatus({
+        at: new Date().toISOString(),
+        synced: false,
+        error: error instanceof Error ? error.message : "Escrow sync failed.",
+      });
+    } finally {
+      setSyncing(false);
+    }
+  }
+
+  async function handleRetryRelease() {
+    if (!escrow) return;
+    setRetryingRelease(true);
+    try {
+      await retryEscrowRelease(escrow.id);
+      await loadEscrow(false);
+      setSyncStatus({ at: new Date().toISOString(), synced: true });
+    } catch (error) {
+      setSyncStatus({
+        at: new Date().toISOString(),
+        synced: false,
+        error: error instanceof Error ? error.message : "Release retry failed.",
+      });
+    } finally {
+      setRetryingRelease(false);
+    }
+  }
+
   return (
     <motion.div
       initial={{ opacity: 0, y: 4 }}
@@ -268,9 +311,41 @@ export default function EscrowTimeline({ taskId }: EscrowTimelineProps) {
               Funding tx
             </a>
           )}
+          <button
+            type="button"
+            onClick={handleSyncEscrow}
+            disabled={syncing}
+            className="text-[10px] font-medium text-ink-muted underline underline-offset-2 disabled:opacity-50"
+          >
+            {syncing ? "Syncing..." : "Sync"}
+          </button>
           <span className="font-mono font-semibold text-ink">${escrow.totalAmount.toFixed(2)} USDC</span>
         </div>
       </div>
+
+      {(syncStatus || escrow.milestones.some((ms) => ms.status === "failed")) && (
+        <div className="border-b border-border px-4 py-2 text-[10px] text-ink-muted">
+          <div className="flex items-center justify-between gap-3">
+            <span>
+              {syncStatus?.error
+                ? `Sync/recovery error: ${syncStatus.error}`
+                : syncStatus?.at
+                  ? `Last checked ${new Date(syncStatus.at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}${syncStatus.synced ? " - synced" : " - local/demo"}`
+                  : "Release retry available for failed milestones."}
+            </span>
+            {escrow.milestones.some((ms) => ms.status === "failed") && (
+              <button
+                type="button"
+                onClick={handleRetryRelease}
+                disabled={retryingRelease}
+                className="shrink-0 rounded border border-border px-2 py-1 text-[10px] font-medium text-ink disabled:opacity-50"
+              >
+                {retryingRelease ? "Retrying..." : "Retry release"}
+              </button>
+            )}
+          </div>
+        </div>
+      )}
 
       {canSign && (
         <div className="px-4 py-3 border-b border-border bg-amber-50/40">

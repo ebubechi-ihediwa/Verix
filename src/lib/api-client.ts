@@ -201,3 +201,19 @@ export async function submitSignedEscrowTransaction(
     body: JSON.stringify(data),
   });
 }
+
+export async function syncEscrowStatus(
+  escrowId: string
+): Promise<{ escrowId: string; synced: boolean; status: string | null; milestoneCount: number; error: string | null }> {
+  return authedRequest(`/api/escrow/${encodeURIComponent(escrowId)}/sync`, {
+    method: "POST",
+  });
+}
+
+export async function retryEscrowRelease(
+  escrowId: string
+): Promise<{ released: number; failed: number; skipped: number }> {
+  return authedRequest(`/api/escrow/${encodeURIComponent(escrowId)}/release`, {
+    method: "POST",
+  });
+}
