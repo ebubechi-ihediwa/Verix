@@ -206,6 +206,110 @@ export async function generateProof(receipt: ExecutionReceipt): Promise<ProofRec
 }
 
 /**
+ * Verify a proven proof — validate its journal against the committed receiptHash
+ * and transition the receipt to "verified" status.
+ *
+ * Verification checks:
+ *   1. Proof must exist and be in "proven" state
+ *   2. Journal.receiptHash must match the stored receiptHash
+ *   3. All journal integrity flags must be true
+ *
+ * On success:
+ *   - Proof.status → "verified", verifiedAt set
+ *   - ExecutionReceipt.status → "verified"
+ *   - proof_verified trace event recorded
+ *
+ * On failure:
+ *   - proof_verification_failed trace event recorded
+ *   - Error is surfaced to caller
+ */
+export async function verifyProof(proofId: string): Promise<ProofRecord> {
+  const proof = await prisma.proof.findUnique({ where: { id: proofId } });
+  if (!proof) throw new Error(`Proof ${proofId} not found`);
+
+  if (proof.status === "verified") {
+    return toProofRecord(proof);
+  }
+
+  if (proof.status !== "proven") {
+    throw new Error(
+      `Proof ${proofId} cannot be verified — current status is "${proof.status}". ` +
+        `Must be "proven" first.`
+    );
+  }
+
+  const journal = proof.journal as unknown as ProofJournal | null;
+  if (!journal) {
+    throw new Error(`Proof ${proofId} has no journal — cannot verify.`);
+  }
+
+  // Guard: journal receiptHash must match stored receiptHash
+  if (journal.receiptHash !== proof.receiptHash) {
+    await recordTraceEvent(
+      proof.taskId,
+      "proof_verification_failed",
+      "system",
+      `Proof verification failed: journal receiptHash mismatch (expected ${proof.receiptHash.slice(0, 16)}..., got ${journal.receiptHash.slice(0, 16)}...)`,
+      { metadata: { proofId, expected: proof.receiptHash, actual: journal.receiptHash } }
+    ).catch(() => { /* non-fatal */ });
+
+    throw new Error(
+      `Proof ${proofId} verification failed: journal receiptHash does not match stored receiptHash.`
+    );
+  }
+
+  // Guard: all integrity flags must be true
+  const failedFlags = (
+    ["spendCapOk", "paymentCorrect", "agentMembershipOk", "receiptIntegrityOk"] as const
+  ).filter((k) => !journal[k]);
+
+  if (failedFlags.length > 0) {
+    await recordTraceEvent(
+      proof.taskId,
+      "proof_verification_failed",
+      "system",
+      `Proof verification failed: integrity flags not satisfied: ${failedFlags.join(", ")}`,
+      { metadata: { proofId, failedFlags } }
+    ).catch(() => { /* non-fatal */ });
+
+    throw new Error(
+      `Proof ${proofId} verification failed: ${failedFlags.join(", ")} not satisfied.`
+    );
+  }
+
+  // Update proof status to verified
+  const now = new Date();
+  const updated = await prisma.proof.update({
+    where: { id: proofId },
+    data: { status: "verified", verifiedAt: now },
+  });
+
+  // Promote receipt to verified
+  await prisma.executionReceipt.update({
+    where: { taskId: proof.taskId },
+    data: { status: "verified" },
+  }).catch((e) => console.warn("[Proof] Receipt status update failed:", e));
+
+  // ── TRACE: proof_verified ──────────────────────────────────────────────
+  await recordTraceEvent(
+    proof.taskId,
+    "proof_verified",
+    "system",
+    `Proof verified — receipt ${proof.receiptHash.slice(0, 16)}... is now cryptographically attested`,
+    {
+      metadata: {
+        proofId,
+        receiptHash: proof.receiptHash,
+        verifiedAt: now.toISOString(),
+        verifierType: journal.verifierType,
+      },
+    }
+  ).catch(() => { /* non-fatal */ });
+
+  return toProofRecord(updated);
+}
+
+/**
  * Fetch a proof record by proof ID.
  */
 export async function getProof(proofId: string): Promise<ProofRecord | null> {
