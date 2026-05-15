@@ -159,6 +159,12 @@ function buildEnv() {
      * release for milestones with releaseCondition === "proof_verified".
      */
     PROOF_MODE: (process.env.PROOF_MODE ?? "local") as "disabled" | "local",
+
+    /**
+     * Maximum concurrent specialist AI calls per coordinator run. Defaults to 1 (sequential).
+     * Payments always run sequentially regardless of this setting.
+     */
+    COORDINATOR_CONCURRENCY_LIMIT: Math.max(1, parseInt(process.env.COORDINATOR_CONCURRENCY_LIMIT ?? "1", 10) || 1),
   } as const;
 }
 
