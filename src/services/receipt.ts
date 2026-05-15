@@ -82,6 +82,7 @@ export interface ReceiptInput {
   totalCost?: number;
   agentVersionIds: string[];
   resultSummary?: string;
+  registrySnapshotHash?: string;
   paymentBreakdown: Array<{
     specialist: string;
     amount: number;
@@ -106,6 +107,7 @@ export async function generateReceipt(input: ReceiptInput): Promise<ExecutionRec
     totalCost,
     agentVersionIds,
     resultSummary,
+    registrySnapshotHash,
     paymentBreakdown,
   } = input;
 
@@ -147,6 +149,7 @@ export async function generateReceipt(input: ReceiptInput): Promise<ExecutionRec
     totalCost: totalCost ?? null,
     traceRoot,
     outputHash: outputHash ?? null,
+    registrySnapshotHash: registrySnapshotHash ?? null,
     paymentSummary,
   };
   const receiptHash = hashCanonical(receiptContent);

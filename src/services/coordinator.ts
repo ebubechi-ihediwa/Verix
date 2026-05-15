@@ -45,6 +45,8 @@ interface InitResult {
 
 interface RouteResult {
   subtasks: Subtask[];
+  registrySnapshotHash: string;
+  selectedAgentVersions: Array<{ specialistName: string; agentVersionId?: string; versionHash?: string }>;
 }
 
 interface SpendCapResult {
@@ -106,7 +108,19 @@ async function stageInitialize(
 // ─────────────────────────────────────────────────────────────────────────────
 
 async function stageRoute(taskId: string, description: string): Promise<RouteResult> {
+  // Snapshot the registry before routing so the receipt can commit to which agents were available
+  const allSpecialists = await getSpecialistSummariesForRouting();
+  const registrySnapshotHash = sha256(
+    JSON.stringify([...allSpecialists].sort((a, b) => a.name.localeCompare(b.name)))
+  );
+
   const subtasks = await decomposeTaskWithAI(description);
+
+  const selectedAgentVersions = subtasks.map((s) => ({
+    specialistName: s.specialistName ?? "unknown",
+    agentVersionId: s.agentVersionId,
+    versionHash: s.versionHash,
+  }));
 
   await transitionExecution(taskId, "discovering", { subtasks });
 
@@ -117,7 +131,12 @@ async function stageRoute(taskId: string, description: string): Promise<RouteRes
     `Task decomposed into ${subtasks.length} subtask(s): ${subtaskNames.join(", ")}`,
     {
       outputHash: sha256(JSON.stringify(subtaskNames)),
-      metadata: { specialists: subtaskNames, count: subtasks.length },
+      metadata: {
+        specialists: subtaskNames,
+        count: subtasks.length,
+        registrySnapshotHash,
+        selectedAgentVersions,
+      },
     }
   ).catch((e) => console.warn("[Trace] task_decomposed failed:", e));
 
@@ -130,7 +149,7 @@ async function stageRoute(taskId: string, description: string): Promise<RouteRes
     ).catch((e) => console.warn("[Trace] specialist_assigned failed:", e));
   }
 
-  return { subtasks };
+  return { subtasks, registrySnapshotHash, selectedAgentVersions };
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -350,7 +369,8 @@ async function stageSynthesize(
   description: string,
   executeResult: ExecuteResult,
   spendCap: number | undefined,
-  initialSubtasks: Subtask[]
+  initialSubtasks: Subtask[],
+  registrySnapshotHash?: string
 ): Promise<void> {
   const { deliverables, payments, totalSpent, subtasks } = executeResult;
 
@@ -419,6 +439,7 @@ async function stageSynthesize(
     totalCost: totalSpent,
     agentVersionIds,
     resultSummary,
+    registrySnapshotHash,
     paymentBreakdown,
   }).catch((e) => console.warn("[Receipt] generateReceipt failed:", e));
 }
@@ -436,7 +457,7 @@ export async function executeCoordinator(
 
   const { effectiveCap } = await stageInitialize(taskId, description, spendCap);
 
-  const { subtasks } = await stageRoute(taskId, description);
+  const { subtasks, registrySnapshotHash } = await stageRoute(taskId, description);
 
   const capResult = await stageSpendCap(taskId, subtasks, effectiveCap);
   if (!capResult.passed) {
@@ -448,7 +469,7 @@ export async function executeCoordinator(
 
   const executeResult = await stageExecute(taskId, description, subtasks, effectiveCap);
 
-  await stageSynthesize(taskId, description, executeResult, spendCap, subtasks);
+  await stageSynthesize(taskId, description, executeResult, spendCap, subtasks, registrySnapshotHash);
 
   console.log(`[Coordinator] Task ${taskId} completed. Total spent: $${executeResult.totalSpent.toFixed(2)} USDC`);
 }
