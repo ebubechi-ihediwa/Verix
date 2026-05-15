@@ -2,6 +2,8 @@ import { prisma } from "@/lib/db";
 import { sha256, hashCanonical } from "@/lib/hash";
 import { computeTraceRoot } from "@/services/trace";
 import { ExecutionReceipt, PaymentSummaryItem } from "@/types/trace";
+import { enqueueJob, startJob, completeJob, failJob } from "@/services/jobs";
+import { env } from "@/lib/env";
 
 /**
  * Receipt Service — Issue #15
@@ -160,7 +162,46 @@ export async function generateReceipt(input: ReceiptInput): Promise<ExecutionRec
     },
   });
 
-  return toReceipt(row);
+  const receipt = toReceipt(row);
+
+  // ── Enqueue proof job (non-fatal, fire-and-forget) ─────────────────────
+  if (env.PROOF_MODE !== "disabled") {
+    runProofJob(receipt).catch((e) =>
+      console.warn("[Receipt] Proof job failed (non-fatal):", e)
+    );
+  }
+
+  return receipt;
+}
+
+/**
+ * Enqueue and immediately execute a proof_generation job for a receipt.
+ *
+ * The Job row provides durable visibility — the proof status is queryable
+ * even if the process crashes mid-generation.
+ */
+async function runProofJob(receipt: ExecutionReceipt): Promise<void> {
+  const job = await enqueueJob(
+    "proof_generation",
+    { receiptId: receipt.id, receiptHash: receipt.receiptHash, taskId: receipt.taskId },
+    receipt.taskId
+  );
+
+  const claimed = await startJob(job.id);
+  if (!claimed) {
+    // Another in-flight request already claimed this job
+    return;
+  }
+
+  try {
+    // Dynamic import avoids circular dependency: receipt ← proof ← receipt
+    const { generateProof } = await import("@/services/proof");
+    await generateProof(receipt);
+    await completeJob(job.id, { receiptHash: receipt.receiptHash });
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : "Unknown proof error";
+    await failJob(job.id, msg);
+  }
 }
 
 export async function getReceipt(taskId: string): Promise<ExecutionReceipt | null> {
