@@ -3,6 +3,7 @@ import { getExecution } from "@/services/execution";
 import { prisma } from "@/lib/db";
 import { getTraceEvents } from "@/services/trace";
 import { getReceipt } from "@/services/receipt";
+import { getEscrowWithMilestones } from "@/services/escrow";
 
 export async function GET(
   _request: NextRequest,
@@ -63,5 +64,13 @@ export async function GET(
     // Non-fatal — receipt may not exist yet for in-progress tasks
   }
 
-  return NextResponse.json({ ...task, subtasks: enrichedSubtasks, traceEvents, receipt });
+  // Include escrow + milestones when available so the dashboard can show escrow state
+  let escrow: Awaited<ReturnType<typeof getEscrowWithMilestones>> = null;
+  try {
+    escrow = await getEscrowWithMilestones(id);
+  } catch {
+    // Non-fatal — escrow may not exist yet or ESCROW_MODE=disabled
+  }
+
+  return NextResponse.json({ ...task, subtasks: enrichedSubtasks, traceEvents, receipt, escrow });
 }

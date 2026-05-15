@@ -8,6 +8,7 @@
  */
 
 import { env } from "@/lib/env";
+import { prisma } from "@/lib/db";
 import {
   EscrowProvider,
   CreateEscrowInput,
@@ -218,4 +219,17 @@ export async function releaseMilestone(
   const provider = getEscrowProvider();
   if (!provider) throw new Error("[escrow] Escrow is disabled (ESCROW_MODE=disabled).");
   return provider.releaseMilestone(input);
+}
+
+// ── DB queries ───────────────────────────────────────────────────────────────
+
+export async function getEscrowWithMilestones(taskId: string) {
+  try {
+    return await prisma.escrow.findUnique({
+      where: { taskId },
+      include: { milestones: { orderBy: { createdAt: "asc" } } },
+    });
+  } catch {
+    return null;
+  }
 }
