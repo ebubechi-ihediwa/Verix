@@ -2,6 +2,7 @@ import OpenAI from "openai";
 import Anthropic from "@anthropic-ai/sdk";
 import { Task, Subtask, TaskResult, TaskEvent } from "@/types/task";
 import { Specialist } from "@/types/specialist";
+import { AgentExecutionEnvelope } from "@/types/execution";
 import {
   appendExecutionEvent,
   completeExecution,
@@ -57,6 +58,13 @@ interface ExecuteResult {
   payments: Payment[];
   totalSpent: number;
   subtasks: Subtask[];
+  envelopes: AgentExecutionEnvelope[];
+}
+
+interface SpecialistResult {
+  output: string;
+  model: string;
+  provider: "claude" | "openai" | "fallback";
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -174,6 +182,7 @@ async function stageExecute(
   const subtasks = [...initialSubtasks];
   const deliverables: Array<{ title: string; content: string; specialistName: string }> = [];
   const payments: Payment[] = [];
+  const envelopes: AgentExecutionEnvelope[] = [];
   let totalSpent = 0;
 
   for (let i = 0; i < subtasks.length; i++) {
@@ -245,15 +254,39 @@ async function stageExecute(
         }
       ).catch((e) => console.warn("[Trace] specialist_invoked failed:", e));
 
-      const result = await executeSpecialist(subtask, description);
+      const specialistResult = await executeSpecialist(subtask, description);
+      const { output: result, model, provider } = specialistResult;
 
       await pushEvent(taskId, "specialist", `${subtask.specialistName} delivered results.`, "info");
+
+      const outputHash = sha256(result);
+      const promptHash = sha256(`${subtask.specialistName}:${description}`);
+      const envelope: AgentExecutionEnvelope = {
+        subtaskId: subtask.id,
+        specialistName: subtask.specialistName!,
+        agentVersionId: subtask.agentVersionId,
+        agentVersionHash: subtask.versionHash,
+        model,
+        provider,
+        promptHash,
+        inputHash: sha256(description),
+        outputHash,
+        completedAt: new Date().toISOString(),
+      };
+      envelopes.push(envelope);
 
       await recordTraceEvent(taskId, "specialist_completed", subtask.specialistName ?? "unknown",
         `${subtask.specialistName} completed successfully`,
         {
-          outputHash: sha256(result),
-          metadata: { specialistName: subtask.specialistName, agentVersionId: subtask.agentVersionId, resultLength: result.length },
+          outputHash,
+          metadata: {
+            specialistName: subtask.specialistName,
+            agentVersionId: subtask.agentVersionId,
+            resultLength: result.length,
+            model,
+            provider,
+            promptHash,
+          },
         }
       ).catch((e) => console.warn("[Trace] specialist_completed failed:", e));
 
@@ -305,7 +338,7 @@ async function stageExecute(
     }
   }
 
-  return { deliverables, payments, totalSpent, subtasks };
+  return { deliverables, payments, totalSpent, subtasks, envelopes };
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -564,7 +597,7 @@ async function decomposeTaskFallback(description: string): Promise<Subtask[]> {
 async function executeSpecialist(
   subtask: Subtask,
   originalTask: string
-): Promise<string> {
+): Promise<SpecialistResult> {
   const specialist = await getSpecialistByName(subtask.specialistName!);
 
   const prompt = `You are ${subtask.specialistName}, a specialist AI agent.
@@ -611,10 +644,10 @@ Format your response in markdown. Be thorough but concise.`;
       const content = message.content[0];
       if (content.type === "text") {
         console.log(`[${subtask.specialistName}] ✅ Claude succeeded`);
-        return content.text;
+        return { output: content.text, model: "claude-3-5-sonnet-20241022", provider: "claude" };
       }
 
-      return "Analysis completed successfully.";
+      return { output: "Analysis completed successfully.", model: "claude-3-5-sonnet-20241022", provider: "claude" };
     } catch (error) {
       console.warn(`[${subtask.specialistName}] ⚠️  Claude failed, falling back to OpenAI:`, error);
     }
@@ -636,13 +669,14 @@ Format your response in markdown. Be thorough but concise.`;
     const content = completion.choices[0]?.message?.content;
     if (content) {
       console.log(`[${subtask.specialistName}] ✅ OpenAI succeeded`);
-      return content;
+      return { output: content, model: "gpt-4o", provider: "openai" };
     }
 
-    return "Analysis completed successfully.";
+    return { output: "Analysis completed successfully.", model: "gpt-4o", provider: "openai" };
   } catch (error) {
     console.warn(`[${subtask.specialistName}] OpenAI also failed, using fallback response:`, error);
-    return `# ${subtask.specialistName} Report\n\nAnalysis completed for: "${originalTask.substring(0, 100)}"\n\nBoth AI providers were unavailable. Please try again later.\n\n---\n*${subtask.specialistName} | $${subtask.cost?.toFixed(2)} USDC via x402*`;
+    const fallbackText = `# ${subtask.specialistName} Report\n\nAnalysis completed for: "${originalTask.substring(0, 100)}"\n\nBoth AI providers were unavailable. Please try again later.\n\n---\n*${subtask.specialistName} | $${subtask.cost?.toFixed(2)} USDC via x402*`;
+    return { output: fallbackText, model: "none", provider: "fallback" };
   }
 }
 
