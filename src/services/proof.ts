@@ -18,6 +18,9 @@ import { recordTraceEvent } from "@/services/trace";
 import { ExecutionReceipt } from "@/types/trace";
 import { ProofInput, ProofJournal, ProofRecord, ProofStatus } from "@/types/proof";
 import { buildProofInput, verify } from "../../proofs/verifier";
+import { createLogger } from "@/utils/logger";
+
+const logger = createLogger("proof");
 
 // ── Proof record mapping ──────────────────────────────────────────────────────
 
@@ -141,6 +144,7 @@ export async function generateProof(receipt: ExecutionReceipt): Promise<ProofRec
       programId: null,
     },
   });
+  logger.info("Proof generation started", { taskId: receipt.taskId, proofId: proof.id, receiptHash: receipt.receiptHash });
 
   // ── TRACE: proof_generation_started ─────────────────────────────────────
   await recordTraceEvent(
@@ -222,6 +226,7 @@ export async function generateProof(receipt: ExecutionReceipt): Promise<ProofRec
       where: { id: proof.id },
       data: { status: "failed", errorMsg },
     }).catch(() => { /* non-fatal */ });
+    logger.error("Proof generation failed", { taskId: receipt.taskId, proofId: proof.id, receiptHash: receipt.receiptHash, errorMsg });
 
     // ── TRACE: proof_generation_failed ───────────────────────────────────
     await recordTraceEvent(
@@ -304,6 +309,7 @@ export async function verifyProof(proofId: string): Promise<ProofRecord> {
     where: { id: proofId },
     data: { status: "verified", verifiedAt: now },
   });
+  logger.info("Proof verified", { taskId: proof.taskId, proofId, receiptHash: proof.receiptHash });
 
   await prisma.executionReceipt.update({
     where: { taskId: proof.taskId },
