@@ -3,9 +3,11 @@
 import { useState, useEffect, use } from "react";
 import Link from "next/link";
 import { motion } from "framer-motion";
-import { getExecutionReceipt, getProofByTask, verifyProof } from "@/lib/api-client";
+import { getEscrowByTask, getExecutionReceipt, getProofByTask, verifyProof } from "@/lib/api-client";
+import { trustlessWorkEscrowViewerUrl } from "@/lib/trustless-work";
 import { ExecutionReceipt } from "@/types/trace";
 import { ProofRecord, ProofJournal } from "@/types/proof";
+import { Escrow, EscrowMilestone } from "@/types/escrow";
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -107,6 +109,7 @@ export default function ReceiptExplorerPage({
 
   const [receipt, setReceipt] = useState<ExecutionReceipt | null>(null);
   const [proof, setProof] = useState<ProofRecord | null>(null);
+  const [escrow, setEscrow] = useState<(Escrow & { milestones: EscrowMilestone[] }) | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [verifying, setVerifying] = useState(false);
@@ -128,6 +131,12 @@ export default function ReceiptExplorerPage({
         setProof(p);
       } catch {
         // Proof may not exist yet — non-fatal
+      }
+      try {
+        const e = await getEscrowByTask(id);
+        setEscrow(e.escrow);
+      } catch {
+        // Escrow may not exist yet - non-fatal
       }
       setLoading(false);
     }
@@ -173,6 +182,7 @@ export default function ReceiptExplorerPage({
   }
 
   const journal = proof?.journal as ProofJournal | undefined;
+  const escrowViewerUrl = trustlessWorkEscrowViewerUrl(escrow?.externalId);
 
   return (
     <div className="min-h-screen bg-surface-secondary">
@@ -199,6 +209,16 @@ export default function ReceiptExplorerPage({
             View Trace →
           </Link>
           {proof && <ProofStatusBadge status={proof.status} />}
+          {escrowViewerUrl && (
+            <a
+              href={escrowViewerUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="text-[11px] text-violet-600 hover:text-violet-800 underline font-mono"
+            >
+              Trustless Work ↗
+            </a>
+          )}
         </div>
       </header>
 

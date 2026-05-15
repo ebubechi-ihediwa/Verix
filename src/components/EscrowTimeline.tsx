@@ -4,6 +4,8 @@ import { useEffect, useState } from "react";
 import { motion } from "framer-motion";
 import { getEscrowByTask, submitSignedEscrowTransaction } from "@/lib/api-client";
 import { getAuthorizedWallet, signWalletTransaction } from "@/lib/wallet-connect";
+import { stellarTxExplorerUrl } from "@/lib/stellar-config";
+import { isDemoEscrowId, trustlessWorkEscrowViewerUrl } from "@/lib/trustless-work";
 import { Escrow, EscrowMilestone, EscrowSignaturePhase } from "@/types/escrow";
 
 interface EscrowTimelineProps {
@@ -189,6 +191,12 @@ export default function EscrowTimeline({ taskId }: EscrowTimelineProps) {
   const signaturePhase: EscrowSignaturePhase | null = fundXdr ? "fund" : createXdr ? "create" : null;
   const unsignedXdr = fundXdr || createXdr;
   const canSign = escrow.status === "funding_pending" && Boolean(signaturePhase && unsignedXdr);
+  const viewerUrl = trustlessWorkEscrowViewerUrl(escrow.externalId);
+  const fundingTxHash = typeof metadata.fundTxHash === "string"
+    ? metadata.fundTxHash
+    : typeof metadata.createTxHash === "string"
+      ? metadata.createTxHash
+      : "";
 
   async function handleSignEscrow() {
     if (!escrow || !signaturePhase || !unsignedXdr) return;
@@ -242,9 +250,26 @@ export default function EscrowTimeline({ taskId }: EscrowTimelineProps) {
       </div>
 
       {/* Summary row */}
-      <div className="px-4 py-2 border-b border-border flex items-center justify-between text-xs">
-        <span className="text-ink-muted">Total locked</span>
-        <span className="font-mono font-semibold text-ink">${escrow.totalAmount.toFixed(2)} USDC</span>
+      <div className="px-4 py-2 border-b border-border flex items-center justify-between gap-3 text-xs">
+        <div className="min-w-0">
+          <span className="text-ink-muted">Total locked</span>
+          {escrow.externalId && isDemoEscrowId(escrow.externalId) && (
+            <span className="ml-2 rounded border border-border px-1.5 py-0.5 text-[9px] text-ink-muted">demo escrow</span>
+          )}
+        </div>
+        <div className="flex shrink-0 items-center gap-2">
+          {viewerUrl && (
+            <a href={viewerUrl} target="_blank" rel="noopener noreferrer" className="text-[10px] font-medium text-violet-600 underline underline-offset-2">
+              View on Trustless Work
+            </a>
+          )}
+          {fundingTxHash && (
+            <a href={stellarTxExplorerUrl(fundingTxHash)} target="_blank" rel="noopener noreferrer" className="text-[10px] font-medium text-emerald-600 underline underline-offset-2">
+              Funding tx
+            </a>
+          )}
+          <span className="font-mono font-semibold text-ink">${escrow.totalAmount.toFixed(2)} USDC</span>
+        </div>
       </div>
 
       {canSign && (
