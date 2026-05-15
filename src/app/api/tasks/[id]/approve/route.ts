@@ -3,6 +3,8 @@ import { canMutate, forbiddenResponse, getSessionId, unauthorizedResponse } from
 import { hashCanonical } from "@/lib/hash";
 import { isStellarPublicKey } from "@/lib/stellar-config";
 import { updateExecution, getExecution } from "@/services/execution";
+import { releaseEscrowMilestones } from "@/services/escrow";
+import { getReceipt } from "@/services/receipt";
 import { recordTraceEvent } from "@/services/trace";
 
 export async function POST(
@@ -86,6 +88,11 @@ export async function POST(
       },
     }
   ).catch(() => { /* non-fatal */ });
+
+  const receipt = await getReceipt(task.id).catch(() => null);
+  if (receipt) {
+    await releaseEscrowMilestones(task.id, receipt).catch(() => { /* non-fatal */ });
+  }
 
   return NextResponse.json({
     approvalStatus: "approved",

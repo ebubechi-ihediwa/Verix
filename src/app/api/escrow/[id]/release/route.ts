@@ -44,7 +44,7 @@ export async function POST(
     );
   }
 
-  const result = await releaseEscrowMilestones(escrow.taskId, receipt);
+  const result = await releaseEscrowMilestones(escrow.taskId, receipt, { allowManual: true });
 
   return NextResponse.json({
     escrowId: id,
