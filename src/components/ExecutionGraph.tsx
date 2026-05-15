@@ -73,6 +73,24 @@ function deriveNodes(events: ExecutionTraceEvent[], taskStatus?: string | null):
       const node = specialistMap.get(name);
       if (node) node.status = "active";
     }
+    if (t === "delegation_approved" || t === "delegation_executed") {
+      const name = (meta.specialistName as string) ?? ev.actor;
+      if (!specialistMap.has(name)) {
+        specialistMap.set(name, {
+          id: name,
+          label: name,
+          type: "specialist",
+          status: t === "delegation_executed" ? "completed" : "active",
+          detail: "delegated",
+        });
+      } else {
+        const node = specialistMap.get(name);
+        if (node) {
+          node.status = t === "delegation_executed" ? "completed" : "active";
+          node.detail = "delegated";
+        }
+      }
+    }
     if (t === "specialist_completed") {
       const name = (meta.specialistName as string) ?? ev.actor;
       const node = specialistMap.get(name);

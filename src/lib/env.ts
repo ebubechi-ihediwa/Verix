@@ -168,6 +168,7 @@ function buildEnv() {
      * Payments always run sequentially regardless of this setting.
      */
     COORDINATOR_CONCURRENCY_LIMIT: Math.max(1, parseInt(process.env.COORDINATOR_CONCURRENCY_LIMIT ?? "1", 10) || 1),
+    COORDINATOR_DELEGATION_MAX_DEPTH: Math.max(0, parseInt(process.env.COORDINATOR_DELEGATION_MAX_DEPTH ?? "1", 10) || 0),
   } as const;
 }
 

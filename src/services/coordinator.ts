@@ -72,6 +72,13 @@ interface SpecialistResult {
   provider: "claude" | "openai" | "groq" | "fallback";
 }
 
+interface DelegationRequest {
+  specialistName: string;
+  capability: string;
+  prompt: string;
+  budgetUsdc: number;
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // HELPER
 // ─────────────────────────────────────────────────────────────────────────────
@@ -247,6 +254,80 @@ async function stageSpendCap(
 // STAGE 4: EXECUTE
 // ─────────────────────────────────────────────────────────────────────────────
 
+function extractDelegationRequest(output: string): DelegationRequest | null {
+  const marker = "VERIX_DELEGATION_REQUEST:";
+  const idx = output.indexOf(marker);
+  if (idx < 0) return null;
+
+  const raw = output.slice(idx + marker.length).trim();
+  const jsonText = raw.startsWith("```")
+    ? raw.replace(/^```(?:json)?/i, "").replace(/```[\s\S]*$/m, "").trim()
+    : raw.split("\n\n")[0]?.trim();
+  try {
+    const parsed = JSON.parse(jsonText) as Partial<DelegationRequest>;
+    if (
+      typeof parsed.specialistName === "string" &&
+      typeof parsed.capability === "string" &&
+      typeof parsed.prompt === "string" &&
+      typeof parsed.budgetUsdc === "number"
+    ) {
+      return {
+        specialistName: parsed.specialistName,
+        capability: parsed.capability,
+        prompt: parsed.prompt,
+        budgetUsdc: parsed.budgetUsdc,
+      };
+    }
+  } catch {
+    return null;
+  }
+  return null;
+}
+
+async function buildDelegatedSubtask(
+  taskId: string,
+  parent: Subtask,
+  request: DelegationRequest,
+  remainingBudget: number
+): Promise<{ subtask?: Subtask; reason?: string }> {
+  const parentDepth = parent.delegationDepth ?? 0;
+  if (parentDepth >= env.COORDINATOR_DELEGATION_MAX_DEPTH) {
+    return { reason: "max_depth_exceeded" };
+  }
+  if (request.budgetUsdc <= 0 || request.budgetUsdc > remainingBudget) {
+    return { reason: "budget_exceeded" };
+  }
+
+  const specialist = await getSpecialistByName(request.specialistName);
+  if (!specialist || specialist.status !== "online") {
+    return { reason: "specialist_unavailable" };
+  }
+  if (specialist.name === parent.specialistName) {
+    return { reason: "self_delegation_rejected" };
+  }
+  if (specialist.priceUsdc > request.budgetUsdc) {
+    return { reason: "requested_budget_below_agent_price" };
+  }
+
+  const activeVersion = await getActiveAgentVersion(specialist.id);
+  return {
+    subtask: {
+      id: crypto.randomUUID(),
+      capability: request.capability,
+      specialistId: specialist.id,
+      specialistName: specialist.name,
+      status: "pending",
+      cost: specialist.priceUsdc,
+      agentVersionId: activeVersion?.id,
+      agentVersion: activeVersion?.version,
+      versionHash: activeVersion?.versionHash,
+      parentSubtaskId: parent.id,
+      delegatedBySpecialistName: parent.specialistName,
+      delegationDepth: parentDepth + 1,
+    },
+  };
+}
+
 async function stageExecute(
   taskId: string,
   description: string,
@@ -395,6 +476,97 @@ async function stageExecute(
             content: result,
             specialistName: subtask.specialistName!,
           });
+
+          const delegation = extractDelegationRequest(result);
+          if (delegation) {
+            await recordTraceEvent(taskId, "delegation_requested", subtask.specialistName ?? "unknown",
+              `${subtask.specialistName} requested subcontractor ${delegation.specialistName}`,
+              { metadata: { parentSubtaskId: subtask.id, ...delegation } }
+            ).catch(() => { /* non-fatal */ });
+
+            const remainingBudget = effectiveCap - totalSpent;
+            const delegated = await buildDelegatedSubtask(taskId, subtask, delegation, remainingBudget);
+            if (!delegated.subtask) {
+              await recordTraceEvent(taskId, "delegation_rejected", "coordinator",
+                `Delegation rejected for ${subtask.specialistName}: ${delegated.reason}`,
+                { metadata: { parentSubtaskId: subtask.id, reason: delegated.reason, requested: delegation } }
+              ).catch(() => { /* non-fatal */ });
+            } else {
+              const child = delegated.subtask;
+              subtasks.push(child);
+              await updateExecution(taskId, { subtasks: [...subtasks] });
+              await recordTraceEvent(taskId, "delegation_approved", "coordinator",
+                `Delegation approved: ${subtask.specialistName} subcontracted ${child.specialistName}`,
+                {
+                  metadata: {
+                    parentSubtaskId: subtask.id,
+                    childSubtaskId: child.id,
+                    specialistName: child.specialistName,
+                    amount: child.cost,
+                    delegationDepth: child.delegationDepth,
+                  },
+                }
+              ).catch(() => { /* non-fatal */ });
+
+              try {
+                const childPayment = await createPayment(taskId, child.specialistName!, child.cost!);
+                payments.push(childPayment);
+                totalSpent += child.cost || 0;
+                const childResult = await executeSpecialist(
+                  child,
+                  `${description}\n\nDelegated scope from ${subtask.specialistName}: ${delegation.prompt}`
+                );
+                const childOutputHash = sha256(childResult.output);
+                const childPromptHash = sha256(`${child.specialistName}:${delegation.prompt}`);
+                envelopes.push({
+                  subtaskId: child.id,
+                  specialistName: child.specialistName!,
+                  agentVersionId: child.agentVersionId,
+                  agentVersionHash: child.versionHash,
+                  model: childResult.model,
+                  provider: childResult.provider,
+                  promptHash: childPromptHash,
+                  inputHash: sha256(delegation.prompt),
+                  outputHash: childOutputHash,
+                  completedAt: new Date().toISOString(),
+                });
+                const childIndex = subtasks.findIndex((s) => s.id === child.id);
+                if (childIndex >= 0) {
+                  subtasks[childIndex] = { ...child, status: "completed", result: childResult.output };
+                }
+                await updateExecution(taskId, { subtasks: [...subtasks] });
+                deliverables.push({
+                  title: `${child.specialistName} Delegated Report`,
+                  content: childResult.output,
+                  specialistName: child.specialistName!,
+                });
+                await recordTraceEvent(taskId, "delegation_executed", child.specialistName ?? "unknown",
+                  `${child.specialistName} completed delegated work for ${subtask.specialistName}`,
+                  {
+                    outputHash: childOutputHash,
+                    metadata: {
+                      parentSubtaskId: subtask.id,
+                      childSubtaskId: child.id,
+                      txHash: childPayment.txHash,
+                      amount: child.cost,
+                      model: childResult.model,
+                      provider: childResult.provider,
+                    },
+                  }
+                ).catch(() => { /* non-fatal */ });
+              } catch (delegationError) {
+                const childIndex = subtasks.findIndex((s) => s.id === child.id);
+                if (childIndex >= 0) {
+                  subtasks[childIndex] = { ...child, status: "failed" };
+                }
+                await updateExecution(taskId, { subtasks: [...subtasks] });
+                await recordTraceEvent(taskId, "delegation_rejected", "coordinator",
+                  `Delegated execution failed for ${child.specialistName}: ${delegationError instanceof Error ? delegationError.message : "Unknown error"}`,
+                  { metadata: { parentSubtaskId: subtask.id, childSubtaskId: child.id } }
+                ).catch(() => { /* non-fatal */ });
+              }
+            }
+          }
 
           if (subtask.specialistId || subtask.specialistName) {
             const specialist = subtask.specialistId
@@ -751,7 +923,12 @@ Provide a comprehensive, professional response that demonstrates your expertise.
 3. Specific recommendations
 4. Conclusion
 
-Format your response in markdown. Be thorough but concise.`;
+Format your response in markdown. Be thorough but concise.
+
+If you need another marketplace specialist to complete a bounded part of the work, append exactly one structured request at the end:
+VERIX_DELEGATION_REQUEST: {"specialistName":"MarketAnalyst","capability":"market-analysis","prompt":"specific delegated scope","budgetUsdc":0.75}
+
+Only request delegation when it materially improves the result. The coordinator may reject requests that exceed budget, depth, or policy.`;
 
   const preferredProvider = specialist?.aiModel ?? "openai";
   const preferClaude = preferredProvider === "claude";

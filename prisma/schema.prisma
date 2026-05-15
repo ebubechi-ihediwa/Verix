@@ -46,6 +46,9 @@ model Subtask {
   cost           Decimal?
   result         String?
   agentVersionId String?
+  parentSubtaskId String?
+  delegatedBySpecialistName String?
+  delegationDepth Int      @default(0)
   createdAt      DateTime @default(now())
   completedAt    DateTime?
 

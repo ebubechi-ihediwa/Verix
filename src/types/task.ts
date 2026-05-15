@@ -45,6 +45,9 @@ export interface Subtask {
   agentVersionId?: string;
   agentVersion?: number;
   versionHash?: string;
+  parentSubtaskId?: string;
+  delegatedBySpecialistName?: string;
+  delegationDepth?: number;
 }
 
 export interface TaskResult {
