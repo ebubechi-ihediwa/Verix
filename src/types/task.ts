@@ -74,6 +74,10 @@ export interface PaymentItem {
   status: "pending" | "confirmed" | "failed";
   agentVersion?: number;
   versionHash?: string;
+  subtaskId?: string;
+  parentSubtaskId?: string;
+  splitRole?: "primary" | "subcontractor";
+  delegatedBySpecialistName?: string;
 }
 
 export interface TaskEvent {

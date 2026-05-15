@@ -64,6 +64,10 @@ function receiptToProofInput(receipt: ExecutionReceipt): ProofInput {
     versionHash: p.versionHash,
     agentVersionHash: p.versionHash,
     txHash: p.txHash,
+    subtaskId: p.subtaskId,
+    parentSubtaskId: p.parentSubtaskId,
+    splitRole: p.splitRole,
+    delegatedBySpecialistName: p.delegatedBySpecialistName,
   }));
 
   return buildProofInput({

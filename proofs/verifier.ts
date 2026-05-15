@@ -40,6 +40,10 @@ function checkReceiptIntegrity(input: ProofInput): boolean {
     recipientAddress: p.recipientAddress,
     agentVersion: p.agentVersion,
     versionHash: p.versionHash ?? p.agentVersionHash,
+    subtaskId: p.subtaskId,
+    parentSubtaskId: p.parentSubtaskId,
+    splitRole: p.splitRole,
+    delegatedBySpecialistName: p.delegatedBySpecialistName,
   }));
 
   const recomputed = hashReceiptCommitment({
@@ -74,7 +78,12 @@ function checkSpendCap(input: ProofInput): boolean {
 function checkPaymentCorrect(input: ProofInput): boolean {
   if (input.paymentIntents.length === 0) return true;
   const sum = input.paymentIntents.reduce((acc, p) => acc + p.amount, 0);
-  return Math.abs(sum - input.totalCost) < 0.001; // $0.001 epsilon
+  const splitRecipientsValid = input.paymentIntents.every((p) =>
+    typeof p.recipientAddress === "string" &&
+    /^G[A-Z2-7]{55}$/.test(p.recipientAddress) &&
+    p.amount > 0
+  );
+  return Math.abs(sum - input.totalCost) < 0.001 && splitRecipientsValid; // $0.001 epsilon
 }
 
 /**
@@ -165,6 +174,10 @@ export function buildProofInput(opts: {
     versionHash?: string;
     agentVersionHash?: string;
     txHash?: string;
+    subtaskId?: string;
+    parentSubtaskId?: string;
+    splitRole?: "primary" | "subcontractor";
+    delegatedBySpecialistName?: string;
   }>;
 }): ProofInput {
   return {

@@ -6,6 +6,7 @@ const VALID_TRACE_ROOT = "a".repeat(64);
 const VALID_OUTPUT_HASH = "b".repeat(64);
 const VERSION_HASH = "c".repeat(64);
 const REGISTRY_HASH = "d".repeat(64);
+const RECIPIENT = "G" + "A".repeat(55);
 
 describe("receipt canonicalization", () => {
   it("uses the same canonical payload for receipts and proof verification", () => {
@@ -23,6 +24,7 @@ describe("receipt canonicalization", () => {
           specialist: "CodeAuditor",
           amount: 1.25,
           txHash: "0xabc",
+          recipientAddress: RECIPIENT,
           agentVersion: 2,
           versionHash: VERSION_HASH,
         },
@@ -44,6 +46,7 @@ describe("receipt canonicalization", () => {
           specialist: "CodeAuditor",
           amount: 1.25,
           txHash: "0xabc",
+          recipientAddress: RECIPIENT,
           agentVersion: 2,
           versionHash: VERSION_HASH,
         },
@@ -71,6 +74,7 @@ describe("receipt canonicalization", () => {
           specialist: "CodeAuditor",
           amount: 1.25,
           txHash: "0xabc",
+          recipientAddress: RECIPIENT,
           agentVersion: 2,
           versionHash: VERSION_HASH,
         },
@@ -92,6 +96,7 @@ describe("receipt canonicalization", () => {
           specialist: "CodeAuditor",
           amount: 1.25,
           txHash: "0xabc",
+          recipientAddress: RECIPIENT,
           agentVersion: 2,
           versionHash: VERSION_HASH,
         },

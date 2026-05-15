@@ -99,6 +99,10 @@ export interface ReceiptInput {
     to?: string;
     agentVersion?: number;
     versionHash?: string;
+    subtaskId?: string;
+    parentSubtaskId?: string;
+    splitRole?: "primary" | "subcontractor";
+    delegatedBySpecialistName?: string;
   }>;
 }
 
@@ -149,6 +153,10 @@ export async function generateReceipt(input: ReceiptInput): Promise<ExecutionRec
     recipientAddress: p.to,
     agentVersion: p.agentVersion,
     versionHash: p.versionHash,
+    subtaskId: p.subtaskId,
+    parentSubtaskId: p.parentSubtaskId,
+    splitRole: p.splitRole,
+    delegatedBySpecialistName: p.delegatedBySpecialistName,
   }));
 
   // Canonical receipt content — deterministic JSON so receiptHash is stable

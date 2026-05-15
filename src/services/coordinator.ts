@@ -633,8 +633,13 @@ async function stageSynthesize(
     }
   }
 
+  const usedSubtaskIds = new Set<string>();
   const paymentBreakdown = payments.map((p) => {
     const vInfo = versionBySpecialist.get(p.specialistId);
+    const matchedSubtask = subtasks.find((s) =>
+      s.specialistName === p.specialistId && !usedSubtaskIds.has(s.id)
+    );
+    if (matchedSubtask) usedSubtaskIds.add(matchedSubtask.id);
     return {
       specialist: p.specialistId,
       amount: p.amount,
@@ -645,6 +650,10 @@ async function stageSynthesize(
       status: p.status === "confirmed" ? ("confirmed" as const) : ("failed" as const),
       agentVersion: vInfo?.agentVersion,
       versionHash: vInfo?.versionHash,
+      subtaskId: matchedSubtask?.id,
+      parentSubtaskId: matchedSubtask?.parentSubtaskId,
+      splitRole: matchedSubtask?.parentSubtaskId ? ("subcontractor" as const) : ("primary" as const),
+      delegatedBySpecialistName: matchedSubtask?.delegatedBySpecialistName,
     };
   });
 

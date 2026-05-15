@@ -36,6 +36,10 @@ export function buildReceiptCommitmentPayload(input: ReceiptCommitmentInput): Re
       recipientAddress: p.recipientAddress,
       agentVersion: p.agentVersion,
       versionHash: p.versionHash,
+      subtaskId: p.subtaskId,
+      parentSubtaskId: p.parentSubtaskId,
+      splitRole: p.splitRole,
+      delegatedBySpecialistName: p.delegatedBySpecialistName,
     })),
   };
 }

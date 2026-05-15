@@ -541,6 +541,11 @@ function ResultCard({
                                         <div className="flex items-center gap-1.5">
                                             <span className={`w-1.5 h-1.5 rounded-full ${p.status === "confirmed" ? "bg-success" : p.status === "failed" ? "bg-error" : "bg-warning"}`} />
                                             <span className="font-medium text-ink">{p.specialist}</span>
+                                            {p.splitRole === "subcontractor" && (
+                                                <span className="rounded border border-border bg-surface px-1.5 py-0.5 text-[9px] text-ink-muted">
+                                                    subcontracted
+                                                </span>
+                                            )}
                                         </div>
                                         <span className="font-mono font-semibold text-ink">${p.amount.toFixed(2)}</span>
                                     </div>
@@ -566,6 +571,12 @@ function ResultCard({
                                             <span className="text-ink-muted">Settlement mode</span>
                                             <span className="text-success">Stellar/Trustless Work intent</span>
                                         </div>
+                                        {p.delegatedBySpecialistName && (
+                                            <div className="flex items-center justify-between">
+                                                <span className="text-ink-muted">Delegated by</span>
+                                                <span className="text-ink-secondary">{p.delegatedBySpecialistName}</span>
+                                            </div>
+                                        )}
                                     </div>
                                 </motion.div>
                             ))}

@@ -58,6 +58,10 @@ export interface PaymentSummaryItem {
   recipientAddress?: string;
   agentVersion?: number;
   versionHash?: string;
+  subtaskId?: string;
+  parentSubtaskId?: string;
+  splitRole?: "primary" | "subcontractor";
+  delegatedBySpecialistName?: string;
 }
 
 export interface ExecutionReceipt {

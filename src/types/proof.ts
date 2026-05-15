@@ -26,6 +26,10 @@ export interface PaymentIntent {
   versionHash?: string;         // receipt-compatible AgentVersion hash field
   agentVersionHash?: string;    // SHA-256 of agent version metadata
   txHash?: string;              // on-chain transaction reference
+  subtaskId?: string;
+  parentSubtaskId?: string;
+  splitRole?: "primary" | "subcontractor";
+  delegatedBySpecialistName?: string;
 }
 
 export interface ProofInput {
