@@ -11,6 +11,8 @@ import {
 } from "@/services/execution";
 import { createPayment } from "@/services/payment";
 import { Payment } from "@/types/payment";
+import { getEscrowProvider } from "@/services/escrow";
+import { prisma } from "@/lib/db";
 import {
   getSpecialistSummariesForRouting,
   getSpecialistByName,
@@ -124,6 +126,14 @@ export async function executeCoordinator(
   }
 
   await pushEvent(taskId, "system", `Spend cap check passed: $${estimatedTotal.toFixed(2)} within $${effectiveCap.toFixed(2)} limit.`, "success");
+
+  // ── ESCROW: create escrow + milestones if enabled ────────────────────────
+  const escrowProvider = getEscrowProvider();
+  if (escrowProvider) {
+    await createEscrowWithMilestones(taskId, subtasks, estimatedTotal, escrowProvider).catch((e) =>
+      console.warn("[Escrow] createEscrowWithMilestones failed (non-fatal):", e)
+    );
+  }
 
   console.log(`[Coordinator] AI routed to ${subtasks.length} subtask(s)`);
 
@@ -604,6 +614,80 @@ Format your response in markdown. Be thorough but concise.`;
     console.warn(`[${subtask.specialistName}] OpenAI also failed, using fallback response:`, error);
     return `# ${subtask.specialistName} Report\n\nAnalysis completed for: "${originalTask.substring(0, 100)}"\n\nBoth AI providers were unavailable. Please try again later.\n\n---\n*${subtask.specialistName} | $${subtask.cost?.toFixed(2)} USDC via x402*`;
   }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// ESCROW MILESTONE CREATION
+// ─────────────────────────────────────────────────────────────────────────────
+
+async function createEscrowWithMilestones(
+  taskId: string,
+  subtasks: Subtask[],
+  totalAmount: number,
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  provider: any
+): Promise<void> {
+  // Resolve coordinator wallet address for payer field (sync, may throw in demo mode)
+  let payerAddress = "demo-coordinator";
+  try {
+    const { getCoordinatorAddress } = await import("@/lib/wallet");
+    payerAddress = getCoordinatorAddress();
+  } catch { /* wallet not configured in demo mode */ }
+
+  // Create the top-level escrow via provider
+  const escrowResult = await provider.createEscrow({
+    taskId,
+    payerAddress,
+    totalAmount,
+    currency: "USDC",
+    metadata: { subtaskCount: subtasks.length },
+  });
+
+  console.log(`[Escrow] Created escrow externalId=${escrowResult.externalId} status=${escrowResult.status}`);
+
+  // Persist escrow record
+  const escrow = await prisma.escrow.create({
+    data: {
+      taskId,
+      externalId: escrowResult.externalId,
+      status: escrowResult.status,
+      totalAmount,
+      currency: "USDC",
+      payerAddress,
+      metadata: { subtaskCount: subtasks.length },
+    },
+  });
+
+  // Create one milestone per subtask
+  for (const subtask of subtasks) {
+    // Resolve specialist wallet address via getSpecialistByName (already imported)
+    let recipientAddress = `demo-wallet-${subtask.specialistName ?? "unknown"}`;
+    try {
+      const specialist = subtask.specialistName
+        ? await getSpecialistByName(subtask.specialistName)
+        : null;
+      if (specialist?.walletAddress) recipientAddress = specialist.walletAddress;
+    } catch { /* non-fatal */ }
+
+    const releaseCondition = env.ESCROW_MODE === "live" ? "receipt_ready" : "auto";
+
+    await prisma.escrowMilestone.create({
+      data: {
+        escrowId: escrow.id,
+        subtaskId: subtask.id,
+        specialistId: subtask.specialistId ?? subtask.specialistName ?? "unknown",
+        recipientAddress,
+        amount: subtask.cost ?? 0,
+        status: escrowResult.status === "funded" ? "funded" : "pending",
+        releaseCondition,
+        agentVersionId: subtask.agentVersionId ?? null,
+        agentVersionHash: subtask.versionHash ?? null,
+        metadata: { capability: subtask.capability, specialistName: subtask.specialistName },
+      },
+    });
+  }
+
+  console.log(`[Escrow] Created ${subtasks.length} milestone(s) for task ${taskId}`);
 }
 
 export function selectSpecialist(
