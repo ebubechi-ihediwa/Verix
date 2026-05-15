@@ -1,11 +1,13 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import Image from "next/image";
 import Link from "next/link";
 import { motion, AnimatePresence } from "framer-motion";
 import { TaskResult } from "@/types/task";
 import { ExecutionReceipt } from "@/types/trace";
+import { ProofRecord } from "@/types/proof";
+import { getProofByTask, verifyProof } from "@/lib/api-client";
 import EscrowTimeline from "@/components/EscrowTimeline";
 
 const EXPLORER_URL =
@@ -319,6 +321,30 @@ function ThinkingBlock({ message }: { message: ChatMessageData }) {
 // ---------- Result Card (embedded inline) ----------
 function ResultCard({ result, taskId, receipt }: { result: TaskResult; taskId?: string; receipt?: ExecutionReceipt }) {
     const [activeTab, setActiveTab] = useState(0);
+    const [proof, setProof] = useState<ProofRecord | null>(null);
+    const [showTechDetails, setShowTechDetails] = useState(false);
+    const [verifying, setVerifying] = useState(false);
+
+    useEffect(() => {
+        if (!taskId) return;
+        getProofByTask(taskId).then(setProof).catch(() => null);
+    }, [taskId]);
+
+    const handleVerify = async () => {
+        if (!proof || verifying) return;
+        setVerifying(true);
+        try {
+            const updated = await verifyProof(proof.id);
+            setProof(updated);
+        } catch {
+            // silently ignore — proof may not be in "proven" state yet
+        } finally {
+            setVerifying(false);
+        }
+    };
+
+    const isVerified = receipt?.status === "verified" || proof?.status === "verified";
+    const canVerify = proof?.status === "proven" && !isVerified;
 
     return (
         <motion.div
@@ -333,31 +359,35 @@ function ResultCard({ result, taskId, receipt }: { result: TaskResult; taskId?: 
 
                 {/* Card */}
                 <div className="flex-1 bg-surface border border-border rounded-2xl overflow-hidden">
+                    {/* Verified banner — prominent when cryptographically attested */}
+                    {isVerified && (
+                        <motion.div
+                            initial={{ opacity: 0, height: 0 }}
+                            animate={{ opacity: 1, height: "auto" }}
+                            className="px-5 py-2.5 bg-violet-50 border-b border-violet-200 flex items-center gap-2"
+                        >
+                            <span className="text-violet-500 text-sm">✓</span>
+                            <span className="text-xs font-semibold text-violet-700">Cryptographically Verified</span>
+                            <span className="text-[10px] text-violet-500 ml-1">
+                                · receipt integrity · spend cap · payments · agent membership
+                            </span>
+                        </motion.div>
+                    )}
+
                     {/* Header */}
                     <div className="px-5 py-3 border-b border-border bg-linear-to-r from-violet-50 to-indigo-50 flex items-center justify-between">
-                        <div className="flex items-center gap-2">
-                            <span className="text-xs font-semibold text-violet-700">
-                                Task Complete
-                            </span>
-                        </div>
+                        <span className="text-xs font-semibold text-violet-700">Task Complete</span>
                         <div className="flex items-center gap-3">
                             <span className="text-xs text-ink-muted font-mono">
-                                {result.totalTime.toFixed(1)}s &middot; $
-                                {result.totalCost.toFixed(2)} USDC
+                                {result.totalTime.toFixed(1)}s &middot; ${result.totalCost.toFixed(2)} USDC
                             </span>
                             {taskId && (
-                                <Link
-                                    href={`/trace/${taskId}`}
-                                    className="text-[10px] font-medium text-violet-600 hover:text-violet-800 transition-colors underline underline-offset-2"
-                                >
+                                <Link href={`/trace/${taskId}`} className="text-[10px] font-medium text-violet-600 hover:text-violet-800 transition-colors underline underline-offset-2">
                                     View Trace →
                                 </Link>
                             )}
                             {taskId && (
-                                <Link
-                                    href={`/receipts/${taskId}`}
-                                    className="text-[10px] font-medium text-emerald-600 hover:text-emerald-800 transition-colors underline underline-offset-2"
-                                >
+                                <Link href={`/receipts/${taskId}`} className="text-[10px] font-medium text-emerald-600 hover:text-emerald-800 transition-colors underline underline-offset-2">
                                     View Receipt →
                                 </Link>
                             )}
@@ -377,16 +407,12 @@ function ResultCard({ result, taskId, receipt }: { result: TaskResult; taskId?: 
                                     <button
                                         key={i}
                                         onClick={() => setActiveTab(i)}
-                                        className={`px-4 py-2.5 text-xs font-medium whitespace-nowrap transition-colors ${activeTab === i
-                                            ? "text-ink border-b-2 border-accent"
-                                            : "text-ink-muted hover:text-ink-secondary"
-                                            }`}
+                                        className={`px-4 py-2.5 text-xs font-medium whitespace-nowrap transition-colors ${activeTab === i ? "text-ink border-b-2 border-accent" : "text-ink-muted hover:text-ink-secondary"}`}
                                     >
                                         {d.title}
                                     </button>
                                 ))}
                             </div>
-
                             <AnimatePresence mode="wait">
                                 <motion.div
                                     key={activeTab}
@@ -396,9 +422,7 @@ function ResultCard({ result, taskId, receipt }: { result: TaskResult; taskId?: 
                                     transition={{ duration: 0.2 }}
                                     className="p-4"
                                 >
-                                    <p className="text-[10px] text-ink-muted mb-2">
-                                        By {result.deliverables[activeTab].specialistName}
-                                    </p>
+                                    <p className="text-[10px] text-ink-muted mb-2">By {result.deliverables[activeTab].specialistName}</p>
                                     <div className="text-xs text-ink-secondary whitespace-pre-wrap font-mono leading-relaxed bg-surface-secondary p-3 rounded-lg border border-border max-h-60 overflow-y-auto chat-scrollbar">
                                         {result.deliverables[activeTab].content}
                                     </div>
@@ -409,9 +433,7 @@ function ResultCard({ result, taskId, receipt }: { result: TaskResult; taskId?: 
 
                     {/* Payment Trail */}
                     <div className="border-t border-border px-5 py-3">
-                        <p className="text-[10px] text-ink-muted uppercase tracking-wide mb-2">
-                            Payment Audit Trail
-                        </p>
+                        <p className="text-[10px] text-ink-muted uppercase tracking-wide mb-2">Payment Audit Trail</p>
                         <div className="space-y-2">
                             {result.paymentBreakdown.map((p, i) => (
                                 <motion.div
@@ -423,33 +445,16 @@ function ResultCard({ result, taskId, receipt }: { result: TaskResult; taskId?: 
                                 >
                                     <div className="flex items-center justify-between mb-1.5">
                                         <div className="flex items-center gap-1.5">
-                                            <span
-                                                className={`w-1.5 h-1.5 rounded-full ${p.status === "confirmed"
-                                                    ? "bg-success"
-                                                    : p.status === "failed"
-                                                        ? "bg-error"
-                                                        : "bg-warning"
-                                                    }`}
-                                            />
-                                            <span className="font-medium text-ink">
-                                                {p.specialist}
-                                            </span>
+                                            <span className={`w-1.5 h-1.5 rounded-full ${p.status === "confirmed" ? "bg-success" : p.status === "failed" ? "bg-error" : "bg-warning"}`} />
+                                            <span className="font-medium text-ink">{p.specialist}</span>
                                         </div>
-                                        <span className="font-mono font-semibold text-ink">
-                                            ${p.amount.toFixed(2)}
-                                        </span>
+                                        <span className="font-mono font-semibold text-ink">${p.amount.toFixed(2)}</span>
                                     </div>
-
                                     <div className="space-y-1 font-mono text-[10px]">
                                         {p.txHash && (
                                             <div className="flex items-center justify-between">
                                                 <span className="text-ink-muted">Tx</span>
-                                                <a
-                                                    href={`${EXPLORER_URL}/tx/${p.txHash}`}
-                                                    target="_blank"
-                                                    rel="noopener noreferrer"
-                                                    className="text-ink-secondary hover:text-ink underline"
-                                                >
+                                                <a href={`${EXPLORER_URL}/tx/${p.txHash}`} target="_blank" rel="noopener noreferrer" className="text-ink-secondary hover:text-ink underline">
                                                     {p.txHash.slice(0, 10)}...{p.txHash.slice(-8)}
                                                 </a>
                                             </div>
@@ -459,11 +464,7 @@ function ResultCard({ result, taskId, receipt }: { result: TaskResult; taskId?: 
                                                 <span className="text-ink-muted">Agent version</span>
                                                 <span className="text-ink-secondary">
                                                     v{p.agentVersion}
-                                                    {p.versionHash && (
-                                                        <span className="text-ink-muted ml-1" title={p.versionHash}>
-                                                            · {p.versionHash.slice(0, 8)}
-                                                        </span>
-                                                    )}
+                                                    {p.versionHash && <span className="text-ink-muted ml-1" title={p.versionHash}>· {p.versionHash.slice(0, 8)}</span>}
                                                 </span>
                                             </div>
                                         )}
@@ -475,12 +476,9 @@ function ResultCard({ result, taskId, receipt }: { result: TaskResult; taskId?: 
                                 </motion.div>
                             ))}
                         </div>
-
                         <div className="mt-2 pt-2 border-t border-border flex items-center justify-between text-xs">
                             <span className="text-ink-secondary">Total Paid</span>
-                            <span className="font-mono font-semibold text-ink">
-                                ${result.totalCost.toFixed(2)} USDC
-                            </span>
+                            <span className="font-mono font-semibold text-ink">${result.totalCost.toFixed(2)} USDC</span>
                         </div>
                     </div>
 
@@ -491,56 +489,118 @@ function ResultCard({ result, taskId, receipt }: { result: TaskResult; taskId?: 
                         </div>
                     )}
 
-                    {/* Execution Receipt */}
+                    {/* Receipt + Proof Summary */}
                     {receipt && (
                         <div className="border-t border-border px-5 py-3">
-                            <div className="flex items-center justify-between mb-2">
-                                <p className="text-[10px] text-ink-muted uppercase tracking-wide">
-                                    Execution Receipt
-                                </p>
-                                <span className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[9px] font-medium ${
-                                    receipt.status === "proof_ready"
-                                        ? "bg-emerald-50 text-emerald-700 border border-emerald-200"
-                                        : receipt.status === "verified"
-                                        ? "bg-violet-50 text-violet-700 border border-violet-200"
-                                        : "bg-surface-tertiary text-ink-muted border border-border"
-                                }`}>
-                                    <span className={`w-1 h-1 rounded-full ${
-                                        receipt.status === "proof_ready" ? "bg-emerald-500" :
-                                        receipt.status === "verified" ? "bg-violet-500" : "bg-ink-muted"
-                                    }`} />
-                                    {receipt.status === "proof_ready" ? "Proof Ready" :
-                                     receipt.status === "verified" ? "Verified" : "Pending"}
-                                </span>
+                            <div className="flex items-center justify-between mb-2.5">
+                                <p className="text-[10px] text-ink-muted uppercase tracking-wide">Execution Receipt</p>
+                                <div className="flex items-center gap-2">
+                                    {canVerify && (
+                                        <button
+                                            onClick={handleVerify}
+                                            disabled={verifying}
+                                            className="text-[9px] px-2 py-0.5 rounded bg-violet-100 text-violet-700 border border-violet-300 hover:bg-violet-200 transition-colors disabled:opacity-50"
+                                        >
+                                            {verifying ? "Verifying…" : "Verify Proof"}
+                                        </button>
+                                    )}
+                                    <span className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[9px] font-medium ${
+                                        isVerified
+                                            ? "bg-violet-50 text-violet-700 border border-violet-200"
+                                            : receipt.status === "proof_ready"
+                                            ? "bg-emerald-50 text-emerald-700 border border-emerald-200"
+                                            : "bg-surface-tertiary text-ink-muted border border-border"
+                                    }`}>
+                                        <span className={`w-1 h-1 rounded-full ${isVerified ? "bg-violet-500" : receipt.status === "proof_ready" ? "bg-emerald-500" : "bg-ink-muted"}`} />
+                                        {isVerified ? "Verified" : receipt.status === "proof_ready" ? "Proof Ready" : "Pending"}
+                                    </span>
+                                </div>
                             </div>
+
+                            {/* Proof coverage note */}
+                            {proof && (
+                                <p className="text-[9px] text-ink-muted mb-2.5 leading-relaxed">
+                                    {isVerified
+                                        ? "This receipt is cryptographically attested: receipt integrity, spend cap compliance, payment correctness, and agent membership are all verified."
+                                        : proof.status === "proven"
+                                        ? "Proof generated. Click ‘Verify Proof’ to run integrity checks."
+                                        : proof.status === "running"
+                                        ? "Proof generation in progress…"
+                                        : proof.status === "failed"
+                                        ? `Proof generation failed: ${proof.errorMsg ?? "unknown error"}`
+                                        : "Awaiting proof generation."}
+                                </p>
+                            )}
+
+                            {/* Key receipt fields (always visible) */}
                             <div className="space-y-1.5 font-mono text-[10px]">
                                 <div className="flex items-center justify-between">
                                     <span className="text-ink-muted">Receipt Hash</span>
-                                    <span className="text-ink-secondary" title={receipt.receiptHash}>
-                                        {receipt.receiptHash.slice(0, 8)}…{receipt.receiptHash.slice(-8)}
-                                    </span>
+                                    <span className="text-ink-secondary" title={receipt.receiptHash}>{receipt.receiptHash.slice(0, 8)}…{receipt.receiptHash.slice(-8)}</span>
                                 </div>
                                 <div className="flex items-center justify-between">
                                     <span className="text-ink-muted">Trace Root</span>
-                                    <span className="text-ink-secondary" title={receipt.traceRoot}>
-                                        {receipt.traceRoot.slice(0, 8)}…{receipt.traceRoot.slice(-8)}
-                                    </span>
-                                </div>
-                                {receipt.agentVersionHashes.length > 0 && (
-                                    <div className="flex items-center justify-between">
-                                        <span className="text-ink-muted">Agent Versions</span>
-                                        <span className="text-ink-secondary">
-                                            {receipt.agentVersionHashes.length} snapshot{receipt.agentVersionHashes.length !== 1 ? "s" : ""} committed
-                                        </span>
-                                    </div>
-                                )}
-                                <div className="flex items-center justify-between">
-                                    <span className="text-ink-muted">Input Hash</span>
-                                    <span className="text-ink-secondary" title={receipt.taskInputHash}>
-                                        {receipt.taskInputHash.slice(0, 8)}…{receipt.taskInputHash.slice(-8)}
-                                    </span>
+                                    <span className="text-ink-secondary" title={receipt.traceRoot}>{receipt.traceRoot.slice(0, 8)}…{receipt.traceRoot.slice(-8)}</span>
                                 </div>
                             </div>
+
+                            {/* Collapsible technical details */}
+                            <button
+                                onClick={() => setShowTechDetails(!showTechDetails)}
+                                className="mt-2 flex items-center gap-1 text-[9px] text-ink-muted hover:text-ink-secondary transition-colors"
+                            >
+                                <motion.svg
+                                    animate={{ rotate: showTechDetails ? 90 : 0 }}
+                                    transition={{ duration: 0.18 }}
+                                    className="w-2.5 h-2.5"
+                                    fill="none"
+                                    viewBox="0 0 24 24"
+                                    strokeWidth={2.5}
+                                    stroke="currentColor"
+                                >
+                                    <path strokeLinecap="round" strokeLinejoin="round" d="M8.25 4.5l7.5 7.5-7.5 7.5" />
+                                </motion.svg>
+                                Technical details
+                            </button>
+
+                            <AnimatePresence initial={false}>
+                                {showTechDetails && (
+                                    <motion.div
+                                        initial={{ height: 0, opacity: 0 }}
+                                        animate={{ height: "auto", opacity: 1 }}
+                                        exit={{ height: 0, opacity: 0 }}
+                                        transition={{ duration: 0.22 }}
+                                        style={{ overflow: "hidden" }}
+                                    >
+                                        <div className="mt-2 space-y-1.5 font-mono text-[10px] pt-2 border-t border-border">
+                                            <div className="flex items-center justify-between">
+                                                <span className="text-ink-muted">Input Hash</span>
+                                                <span className="text-ink-secondary" title={receipt.taskInputHash}>{receipt.taskInputHash.slice(0, 8)}…{receipt.taskInputHash.slice(-8)}</span>
+                                            </div>
+                                            {receipt.outputHash && (
+                                                <div className="flex items-center justify-between">
+                                                    <span className="text-ink-muted">Output Hash</span>
+                                                    <span className="text-ink-secondary" title={receipt.outputHash}>{receipt.outputHash.slice(0, 8)}…{receipt.outputHash.slice(-8)}</span>
+                                                </div>
+                                            )}
+                                            {receipt.agentVersionHashes.length > 0 && (
+                                                <div className="flex flex-col gap-0.5">
+                                                    <span className="text-ink-muted">Agent Snapshots ({receipt.agentVersionHashes.length})</span>
+                                                    {receipt.agentVersionHashes.map((h, i) => (
+                                                        <span key={i} className="text-ink-muted/70 pl-2" title={h}>{h.slice(0, 12)}…</span>
+                                                    ))}
+                                                </div>
+                                            )}
+                                            {receipt.spendCap != null && (
+                                                <div className="flex items-center justify-between">
+                                                    <span className="text-ink-muted">Spend Cap</span>
+                                                    <span className="text-ink-secondary">${receipt.spendCap.toFixed(2)} USDC</span>
+                                                </div>
+                                            )}
+                                        </div>
+                                    </motion.div>
+                                )}
+                            </AnimatePresence>
                         </div>
                     )}
                 </div>
