@@ -3,6 +3,7 @@ import { Specialist, SpecialistProfile } from "@/types/specialist";
 import { WalletBalance } from "@/types/payment";
 import { ExecutionTraceEvent, ExecutionReceipt } from "@/types/trace";
 import { ProofRecord } from "@/types/proof";
+import { Escrow, EscrowMilestone } from "@/types/escrow";
 
 const API_URL = process.env.NEXT_PUBLIC_APP_URL || "";
 
@@ -167,4 +168,10 @@ export async function verifyProof(proofId: string): Promise<ProofRecord> {
   return request(`/api/proofs/${encodeURIComponent(proofId)}/verify`, {
     method: "POST",
   });
+}
+
+export async function getEscrowByTask(
+  taskId: string
+): Promise<{ escrow: (Escrow & { milestones: EscrowMilestone[] }) | null }> {
+  return request(`/api/escrow?taskId=${encodeURIComponent(taskId)}`);
 }

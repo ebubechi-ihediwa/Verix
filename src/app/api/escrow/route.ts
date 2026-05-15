@@ -1,9 +1,24 @@
 import { NextRequest, NextResponse } from "next/server";
 import { env } from "@/lib/env";
 import { getEscrowProvider, createEscrow } from "@/services/escrow";
+import { prisma } from "@/lib/db";
 
-// GET /api/escrow — health check + current adapter mode
-export async function GET() {
+// GET /api/escrow — health check, or ?taskId= to fetch escrow + milestones for a task
+export async function GET(request: NextRequest) {
+  const taskId = request.nextUrl.searchParams.get("taskId");
+
+  if (taskId) {
+    const escrow = await prisma.escrow.findFirst({
+      where: { taskId },
+      include: { milestones: { orderBy: { createdAt: "asc" } } },
+    }).catch(() => null);
+
+    if (!escrow) {
+      return NextResponse.json({ escrow: null }, { status: 200 });
+    }
+    return NextResponse.json({ escrow });
+  }
+
   const mode = env.ESCROW_MODE;
   const provider = getEscrowProvider();
 

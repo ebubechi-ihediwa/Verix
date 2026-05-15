@@ -6,6 +6,7 @@ import Link from "next/link";
 import { motion, AnimatePresence } from "framer-motion";
 import { TaskResult } from "@/types/task";
 import { ExecutionReceipt } from "@/types/trace";
+import EscrowTimeline from "@/components/EscrowTimeline";
 
 const EXPLORER_URL =
     "https://staging-utter-unripe-menkar.explorer.staging-v3.skalenodes.com";
@@ -333,7 +334,7 @@ function ResultCard({ result, taskId, receipt }: { result: TaskResult; taskId?: 
                 {/* Card */}
                 <div className="flex-1 bg-surface border border-border rounded-2xl overflow-hidden">
                     {/* Header */}
-                    <div className="px-5 py-3 border-b border-border bg-gradient-to-r from-violet-50 to-indigo-50 flex items-center justify-between">
+                    <div className="px-5 py-3 border-b border-border bg-linear-to-r from-violet-50 to-indigo-50 flex items-center justify-between">
                         <div className="flex items-center gap-2">
                             <span className="text-xs font-semibold text-violet-700">
                                 Task Complete
@@ -482,6 +483,13 @@ function ResultCard({ result, taskId, receipt }: { result: TaskResult; taskId?: 
                             </span>
                         </div>
                     </div>
+
+                    {/* Escrow Milestone Timeline */}
+                    {taskId && (
+                        <div className="border-t border-border px-5 py-3">
+                            <EscrowTimeline taskId={taskId} />
+                        </div>
+                    )}
 
                     {/* Execution Receipt */}
                     {receipt && (
