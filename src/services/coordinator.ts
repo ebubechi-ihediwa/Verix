@@ -645,6 +645,12 @@ async function createEscrowWithMilestones(
 
   console.log(`[Escrow] Created escrow externalId=${escrowResult.externalId} status=${escrowResult.status}`);
 
+  // ── TRACE: escrow_created ──────────────────────────────────────────────────
+  await recordTraceEvent(taskId, "escrow_created", "coordinator",
+    `Escrow created (${env.ESCROW_MODE} mode): externalId=${escrowResult.externalId}`,
+    { metadata: { externalId: escrowResult.externalId, status: escrowResult.status, totalAmount, mode: env.ESCROW_MODE } }
+  ).catch((e) => console.warn("[Trace] escrow_created failed:", e));
+
   // Persist escrow record
   const escrow = await prisma.escrow.create({
     data: {
@@ -685,6 +691,20 @@ async function createEscrowWithMilestones(
         metadata: { capability: subtask.capability, specialistName: subtask.specialistName },
       },
     });
+  }
+
+  // ── TRACE: escrow_funded (demo mode considers escrow funded immediately) ───
+  if (escrowResult.status === "funded") {
+    await recordTraceEvent(taskId, "escrow_funded", "coordinator",
+      `Escrow funded: $${totalAmount.toFixed(2)} USDC locked for ${subtasks.length} milestone(s)`,
+      { metadata: { externalId: escrowResult.externalId, totalAmount, milestoneCount: subtasks.length } }
+    ).catch((e) => console.warn("[Trace] escrow_funded failed:", e));
+
+    // Update escrow status to in_progress since milestones are created and funded
+    await prisma.escrow.update({
+      where: { id: escrow.id },
+      data: { status: "in_progress" },
+    }).catch((e) => console.warn("[Escrow] status update to in_progress failed:", e));
   }
 
   console.log(`[Escrow] Created ${subtasks.length} milestone(s) for task ${taskId}`);
