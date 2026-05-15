@@ -1,0 +1,29 @@
+{
+  "_comment": "Demo fixture for local proof verification testing. receiptHash is pre-computed from the canonical fields below.",
+  "version": "1.0",
+  "taskId": "demo-task-001",
+  "taskInputHash": "a665a45920422f9d417e4867efdc4fb8a04a1f3fff1fa07e998e86f7f7a27ae3",
+  "receiptHash": "RECOMPUTE_WITH_VERIFIER",
+  "traceRoot": "b94f6f125c79e3a5ffaa826f584c10d52609a41e7a50abe3b6a11f22f9c1a8d2",
+  "agentVersionHashes": [
+    "abc123def456abc123def456abc123def456abc123def456abc123def456abc1",
+    "def456abc123def456abc123def456abc123def456abc123def456abc123def4"
+  ],
+  "spendCap": 50.00,
+  "totalCost": 6.00,
+  "outputHash": "c0535e4be2b79ffd93291305436bf889314e4a3faec05ecffcbb7df31ad9e51a",
+  "paymentIntents": [
+    {
+      "specialist": "CodeAuditor",
+      "amount": 3.00,
+      "agentVersionHash": "abc123def456abc123def456abc123def456abc123def456abc123def456abc1",
+      "txHash": "0xdemo1234567890abcdef1234567890abcdef1234567890abcdef1234567890ab"
+    },
+    {
+      "specialist": "MarketAnalyst",
+      "amount": 3.00,
+      "agentVersionHash": "def456abc123def456abc123def456abc123def456abc123def456abc123def4",
+      "txHash": "0xdemo9876543210fedcba9876543210fedcba9876543210fedcba9876543210fe"
+    }
+  ]
+}

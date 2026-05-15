@@ -24,6 +24,7 @@ model Task {
   traceEvents  ExecutionTraceEvent[]
   receipt      ExecutionReceipt?
   escrow       Escrow?
+  proofs       Proof[]
 }
 
 model Subtask {
@@ -244,6 +245,37 @@ model Job {
 
   @@index([taskId])
   @@index([status, type])
+}
+
+/**
+ * Proof record for a completed execution.
+ *
+ * Created when PROOF_MODE != "disabled" after receipt generation.
+ * journal stores the ProofJournal (public outputs: spendCapOk, paymentCorrect, etc.)
+ * Idempotent on receiptId — only one proof per receipt.
+ *
+ * ProofStatus: pending | running | proven | verified | failed
+ */
+model Proof {
+  id            String    @id @default(cuid())
+  taskId        String
+  receiptId     String    @unique
+  receiptHash   String
+  schemaVersion String    @default("1.0")
+  /// ProofStatus: pending | running | proven | verified | failed
+  status        String    @default("pending")
+  programId     String?
+  journal       Json?
+  artifactUri   String?
+  errorMsg      String?
+  createdAt     DateTime  @default(now())
+  provenAt      DateTime?
+  verifiedAt    DateTime?
+
+  task Task @relation(fields: [taskId], references: [id], onDelete: Cascade)
+
+  @@index([taskId])
+  @@index([status])
 }
 
 /**
