@@ -33,7 +33,10 @@
       "Bash(Select-Object -ExpandProperty FullName)",
       "Bash(Sort-Object)",
       "Bash(xargs grep -l \"SKALE\\\\|ethers\\\\|blockchain\")",
-      "Bash(Remove-Item \"c:\\\\Users\\\\Ebubechi\\\\Documents\\\\codes\\\\my-projects\\\\boundless-hackathon\\\\agent-specialization-network\\\\src\\\\proxy.ts\")"
+      "Bash(Remove-Item \"c:\\\\Users\\\\Ebubechi\\\\Documents\\\\codes\\\\my-projects\\\\boundless-hackathon\\\\agent-specialization-network\\\\src\\\\proxy.ts\")",
+      "Bash(Get-ChildItem -Path \"c:\\\\Users\\\\Ebubechi\\\\Documents\\\\codes\\\\my-projects\\\\boundless-hackathon\\\\verix\" -Force)",
+      "Bash(Select-Object Name, PSIsContainer)",
+      "Bash(Format-Table -AutoSize)"
     ],
     "additionalDirectories": [
       "c:\\Users\\Ebubechi\\Documents\\codes\\my-projects\\boundless-hackathon\\agent-specialization-network\\src\\app\\trace",

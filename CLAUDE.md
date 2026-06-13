@@ -47,7 +47,7 @@ Five ordered stages per task:
 1. **stageInitialize** — record `coordinator_start` trace event, set effective spend cap
 2. **stageRoute** — AI decomposes task into subtasks, selects specialists, snapshots `registrySnapshotHash` (sha256 of sorted specialist registry)
 3. **stageSpendCap** — reject if estimated total exceeds cap
-4. **stageExecute** — Phase A: serial payment creation per subtask → Phase B: concurrent AI calls (`COORDINATOR_CONCURRENCY_LIMIT` batches via `Promise.allSettled`)
+4. **stageExecute** — Phase A: serial payment creation per subtask → Phase B: concurrent AI calls (`COORDINATOR_CONCURRENCY_LIMIT` batches via `Promise.allSettled`). Specialists may delegate subtasks to other specialists up to `COORDINATOR_DELEGATION_MAX_DEPTH` (default 1); delegation is rejected if depth is exceeded, budget is insufficient, or a specialist tries to delegate to itself.
 5. **stageSynthesize** — build payment breakdown, call `generateReceipt()`, record `task_completed` event
 
 ### Hash-chained trace (`src/services/trace.ts`)
@@ -69,13 +69,15 @@ The verifier does **not** prove LLM outputs or off-chain computation quality.
 
 Adapter pattern — `DemoEscrowAdapter` (in-process) or `TrustlessWorkAdapter` (Stellar/Soroban via REST API). Milestone release conditions: `proof_verified`, `receipt_ready`, `manual`, `auto`. `releaseEscrowMilestones()` is called after proof verification.
 
+XDR signing modes: `TRUSTLESS_WORK_SIGNING_MODE=wallet` — server returns unsigned XDR; user signs via Albedo/Freighter in-browser. `TRUSTLESS_WORK_SIGNING_MODE=server` (default) — server signs XDR using `COORDINATOR_STELLAR_PRIVATE_KEY`.
+
 ### On-chain anchoring (`src/services/anchor.ts`)
 
 After proof verification, receipt hashes are anchored to a Soroban `ReceiptAnchor` contract. Contract IDs are stored in `SOROBAN_RECEIPT_ANCHOR_CONTRACT_ID` env var.
 
 ### Agents/specialists (`src/services/discovery.ts`, `src/services/routing.ts`)
 
-Specialists are stored in the DB with `aiModel` (claude/openai/groq), `proofPolicy` (trace-only/receipt-proof/escrow-eligible), `priceUsdc`, and `walletAddress` (Stellar `G...` public key). Routing uses AI to match subtasks to specialists.
+Specialists are stored in the DB with `aiModel` (claude/openai/groq), `proofPolicy` (trace-only/receipt-proof/escrow-eligible), `priceUsdc`, and `walletAddress` (Stellar `G...` public key). Routing uses AI to match subtasks to specialists. Supported AI providers: Claude (Anthropic), GPT-4o (OpenAI), and Llama 3.3 70B via Groq's OpenAI-compatible API.
 
 ### Stellar payments (`src/lib/stellar-config.ts`, `src/services/payment.ts`)
 
@@ -86,6 +88,7 @@ Payments are USDC transfers on Stellar. Coordinator wallet key comes from `COORD
 - Published agents use Stellar public keys (`G...`) as payout addresses — never EVM addresses.
 - The old SKALE/EVM/x402 path is deprecated and removed.
 - Tailwind v4: use `bg-linear-to-r` not `bg-gradient-to-r` (applies to all gradient classes).
+- TypeScript path alias: `@/` resolves to `src/*`.
 - One branch per GitHub issue, stacked on the previous issue's branch. Create a consolidation PR to `main` after each EPIC.
 - Never add `Co-Authored-By: Claude` to commits.
 
@@ -124,6 +127,11 @@ SOROBAN_AGENT_REGISTRY_CONTRACT_ID
 SOROBAN_RECEIPT_ANCHOR_CONTRACT_ID
 ESCROW_MODE                       # disabled | demo | live
 TRUSTLESS_WORK_API_URL / API_KEY
+TRUSTLESS_WORK_SIGNING_MODE       # wallet | server (default: server)
 PROOF_MODE                        # disabled | local
 COORDINATOR_CONCURRENCY_LIMIT     # default 1 (serial)
+COORDINATOR_DELEGATION_MAX_DEPTH  # default 1; set 0 to disable delegation
+COORDINATOR_STELLAR_PRIVATE_KEY   # required for server-side XDR signing
+GROQ_API_KEY                      # Groq AI provider
+GROQ_MODEL                        # default: llama-3.3-70b-versatile
 ```
