@@ -12,6 +12,8 @@ const eslintConfig = defineConfig([
     "out/**",
     "build/**",
     "next-env.d.ts",
+    // Reference-only landing source (migrated into src/app/page.tsx)
+    "landing revamp/**",
   ]),
 ]);
 

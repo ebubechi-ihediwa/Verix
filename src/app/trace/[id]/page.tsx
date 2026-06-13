@@ -5,6 +5,7 @@ import Link from "next/link";
 import { motion } from "framer-motion";
 import { getExecutionTrace, getExecutionReceipt } from "@/lib/api-client";
 import { ExecutionTraceEvent, ExecutionReceipt } from "@/types/trace";
+import HashChainVisualizer from "@/components/HashChainVisualizer";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -44,9 +45,9 @@ function actorBadgeClass(actor: string): string {
 }
 
 function proofStatusLabel(status: string) {
-  if (status === "proof_ready") return { label: "Proof Ready", cls: "text-emerald-700 bg-emerald-50 border-emerald-200" };
-  if (status === "verified") return { label: "Verified", cls: "text-violet-700 bg-violet-50 border-violet-200" };
-  return { label: "Pending", cls: "text-ink-muted bg-surface-tertiary border-border" };
+  if (status === "proof_ready") return { label: "Proof Ready", cls: "verix-status", style: { color: "var(--color-brand-600)", background: "#ede9fe", borderColor: "#c4b5fd" } };
+  if (status === "verified") return { label: "Verified", cls: "verix-status verix-status-success", style: undefined };
+  return { label: "Pending", cls: "verix-status verix-status-neutral", style: undefined };
 }
 
 // ── Page ─────────────────────────────────────────────────────────────────────
@@ -142,17 +143,11 @@ export default function TracePage({
         <span className="text-border">·</span>
         <span className="text-[10px] font-mono text-ink-muted">{id}</span>
         <div className="ml-auto flex items-center gap-2">
-          <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-medium border ${
-            trace.status === "completed"
-              ? "bg-emerald-50 text-emerald-700 border-emerald-200"
-              : trace.status === "failed"
-              ? "bg-red-50 text-red-700 border-red-200"
-              : "bg-amber-50 text-amber-700 border-amber-200"
-          }`}>
-            <span className={`w-1 h-1 rounded-full ${
-              trace.status === "completed" ? "bg-emerald-500" :
-              trace.status === "failed" ? "bg-red-500" : "bg-amber-500"
-            }`} />
+          <span className={
+            trace.status === "completed" ? "verix-status verix-status-success" :
+            trace.status === "failed" ? "verix-status verix-status-error" :
+            "verix-status verix-status-warning"
+          }>
             {trace.status}
           </span>
         </div>
@@ -170,7 +165,7 @@ export default function TracePage({
             <div className="px-5 py-3 border-b border-border bg-surface-secondary flex items-center justify-between">
               <span className="text-xs font-semibold text-violet-700">Execution Receipt</span>
               {proofStatus && (
-                <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-medium border ${proofStatus.cls}`}>
+                <span className={proofStatus.cls} style={proofStatus.style}>
                   {proofStatus.label}
                 </span>
               )}
@@ -324,6 +319,11 @@ export default function TracePage({
             </div>
           )}
         </div>
+
+        {/* Hash-chain visualizer */}
+        {trace.events.length > 0 && (
+          <HashChainVisualizer events={trace.events} />
+        )}
       </div>
     </div>
   );

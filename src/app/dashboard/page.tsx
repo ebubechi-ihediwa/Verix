@@ -1,1287 +1,1210 @@
 "use client";
 
-import { useState, useEffect, useCallback, useMemo, useRef } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import Link from "next/link";
-import { ArrowUp, LoaderCircle, Menu, Paperclip, Settings, Unplug, Wallet, X } from "lucide-react";
-import ChatMessage, { ChatMessageData, ThinkingStep } from "@/components/ChatMessage";
-import ChatSidebar from "@/components/ChatSidebar";
-import ExecutionGraph from "@/components/ExecutionGraph";
-import VerixMark from "@/components/VerixMark";
-import { Task, TaskStatus, TaskResult, Subtask, TaskEvent } from "@/types/task";
-import { ExecutionTraceEvent } from "@/types/trace";
+import Image from "next/image";
 import {
-  submitTask,
-  getTaskStatus,
-  getWalletBalance,
-  getTaskHistory,
-  getSpecialists,
-  deleteTask,
-  getOrInitSession,
-  getCurrentSession,
-} from "@/lib/api-client";
-import { Specialist } from "@/types/specialist";
-import {
-  clearCachedConnectedWallet,
-  connectWallet,
-  getCachedConnectedWallet,
-  getWalletOptions,
-  WalletProviderId,
-} from "@/lib/wallet-connect";
-import { DEMO_GOLDEN_PROMPT, DEMO_SPEND_CAP_USDC } from "@/lib/demo-scenario";
-import { WalletBalance } from "@/types/payment";
+  LoaderCircle, Settings, Wallet, Unplug, ChevronRight,
+  TrendingUp, ArrowRightLeft, Droplets, ArrowUpRight, ShieldCheck,
+  ExternalLink, X, RefreshCw,
+} from "lucide-react";
 import { toast } from "sonner";
+import {
+  submitTask, getTaskStatus, getWalletBalance,
+  getTaskHistory, getSpecialists,
+  getOrInitSession, getCurrentSession,
+} from "@/lib/api-client";
+import {
+  connectWallet, clearCachedConnectedWallet, getCachedConnectedWallet,
+  getWalletOptions, WalletProviderId,
+} from "@/lib/wallet-connect";
+import { Task, TaskStatus, TaskResult, CreateTaskResponse } from "@/types/task";
+import { ExecutionTraceEvent, ExecutionReceipt } from "@/types/trace";
+import { Specialist } from "@/types/specialist";
+import { WalletBalance } from "@/types/payment";
 
-// Pure helper — defined outside component so it is stable across renders
-function traceEventToThinkingStep(e: ExecutionTraceEvent): ThinkingStep {
-  const deriveStatus = (type: string): ThinkingStep["status"] => {
-    if (type.includes("failed") || type.includes("exceeded")) return "error";
-    if (type.includes("confirmed") || type.includes("completed")) return "success";
-    if (type.includes("initiated") || type.includes("invoked") || type.includes("assigned")) return "pending";
-    return "info";
-  };
-  return {
-    message: e.displayMessage,
-    status: deriveStatus(e.eventType),
-    type: e.actor === "payment" ? "payment" : e.actor === "coordinator" ? "coordinator" : "specialist",
-    timestamp: e.timestamp,
-    actor: e.actor,
-    eventType: e.eventType,
-    eventHash: e.eventHash,
-    sequence: e.sequence,
-  };
+// ── Constants ─────────────────────────────────────────────────────────────────
+
+const PROTOCOL_META: Record<string, { color: string; bg: string; border: string; icon: React.ReactNode }> = {
+  blend:    { color: "#4ade80", bg: "rgba(74,222,128,0.08)",  border: "rgba(74,222,128,0.20)",  icon: <TrendingUp size={12} /> },
+  soroswap: { color: "#fbbf24", bg: "rgba(251,191,36,0.08)",  border: "rgba(251,191,36,0.20)",  icon: <ArrowRightLeft size={12} /> },
+  aquarius: { color: "#818cf8", bg: "rgba(129,140,248,0.10)", border: "rgba(129,140,248,0.25)", icon: <Droplets size={12} /> },
+  anchor:   { color: "#38bdf8", bg: "rgba(56,189,248,0.08)",  border: "rgba(56,189,248,0.20)",  icon: <ArrowUpRight size={12} /> },
+};
+
+type Protocol = "blend" | "soroswap" | "aquarius" | "anchor";
+
+interface MandateField {
+  key: string; label: string; type: "number" | "text" | "select";
+  placeholder?: string; options?: string[]; unit?: string; defaultValue?: string;
 }
 
-const WALLET_BALANCE_CACHE_KEY = "verix_wallet_balance_cache";
-
-function readCachedWalletBalance(address: string): WalletBalance | null {
-  if (typeof window === "undefined" || !address) return null;
-
-  try {
-    const raw = localStorage.getItem(WALLET_BALANCE_CACHE_KEY);
-    if (!raw) return null;
-    const cached = JSON.parse(raw) as WalletBalance & { cachedAt?: number };
-    if (cached.address !== address) return null;
-    if (cached.error) return null;
-    return cached;
-  } catch {
-    return null;
-  }
+interface MandateTemplate {
+  id: string; protocol: Protocol; label: string; tag: string;
+  agentEndpoint: string; fields: MandateField[];
 }
 
-function writeCachedWalletBalance(balance: WalletBalance) {
-  if (typeof window === "undefined" || !balance.address?.startsWith("G")) return;
-  localStorage.setItem(
-    WALLET_BALANCE_CACHE_KEY,
-    JSON.stringify({ ...balance, cachedAt: Date.now() })
+const TEMPLATES: MandateTemplate[] = [
+  {
+    id: "blend-supply", protocol: "blend", label: "Supply to Blend", tag: "Yield",
+    agentEndpoint: "/api/specialists/blend-agent/execute",
+    fields: [
+      { key: "pool",   label: "Pool",    type: "select",  options: ["USDC-XLM","USDC-ETH","USDC-BTC"], defaultValue: "USDC-XLM" },
+      { key: "amount", label: "Amount",  type: "number",  placeholder: "100", unit: "USDC" },
+      { key: "minApy", label: "Min APY", type: "number",  placeholder: "5",   unit: "%" },
+    ],
+  },
+  {
+    id: "blend-rates", protocol: "blend", label: "Check Blend Rates", tag: "Yield",
+    agentEndpoint: "/api/specialists/blend-agent/execute",
+    fields: [
+      { key: "pool", label: "Pool", type: "select", options: ["USDC-XLM","USDC-ETH","USDC-BTC"], defaultValue: "USDC-XLM" },
+    ],
+  },
+  {
+    id: "soroswap-swap", protocol: "soroswap", label: "Swap on Soroswap", tag: "Trading",
+    agentEndpoint: "/api/specialists/soroswap-agent/execute",
+    fields: [
+      { key: "tokenIn",    label: "From",         type: "select", options: ["USDC","XLM","ETH","BTC"], defaultValue: "USDC" },
+      { key: "tokenOut",   label: "To",           type: "select", options: ["XLM","USDC","ETH","BTC"], defaultValue: "XLM" },
+      { key: "amountIn",   label: "Amount",       type: "number", placeholder: "50",  unit: "USDC" },
+      { key: "maxSlippage",label: "Max Slippage", type: "number", placeholder: "0.5", unit: "%" },
+    ],
+  },
+  {
+    id: "soroswap-quote", protocol: "soroswap", label: "Get Swap Quote", tag: "Trading",
+    agentEndpoint: "/api/specialists/soroswap-agent/execute",
+    fields: [
+      { key: "tokenIn",  label: "From",   type: "select", options: ["USDC","XLM","ETH","BTC"], defaultValue: "USDC" },
+      { key: "tokenOut", label: "To",     type: "select", options: ["XLM","USDC","ETH","BTC"], defaultValue: "XLM" },
+      { key: "amountIn", label: "Amount", type: "number", placeholder: "100", unit: "USDC" },
+    ],
+  },
+  {
+    id: "aquarius-add", protocol: "aquarius", label: "Add Liquidity", tag: "Liquidity",
+    agentEndpoint: "/api/specialists/aquarius-agent/execute",
+    fields: [
+      { key: "tokenPair", label: "Pool",   type: "select", options: ["XLM/USDC","XLM/AQUA","USDC/BTC"], defaultValue: "XLM/USDC" },
+      { key: "amount",    label: "Amount", type: "number", placeholder: "200", unit: "USDC equiv." },
+    ],
+  },
+  {
+    id: "aquarius-pool", protocol: "aquarius", label: "Read Pool State", tag: "Liquidity",
+    agentEndpoint: "/api/specialists/aquarius-agent/execute",
+    fields: [
+      { key: "tokenPair", label: "Pool", type: "select", options: ["XLM/USDC","XLM/AQUA","USDC/BTC"], defaultValue: "XLM/USDC" },
+    ],
+  },
+  {
+    id: "anchor-payment", protocol: "anchor", label: "Cross-border Payment", tag: "Payments",
+    agentEndpoint: "/api/specialists/anchor-agent/execute",
+    fields: [
+      { key: "amount",        label: "Amount",   type: "number", placeholder: "500",  unit: "USDC" },
+      { key: "destination",   label: "Currency", type: "select", options: ["NGN","KES","GHS","ZAR","USD"], defaultValue: "NGN" },
+      { key: "maxFeePercent", label: "Max Fee",  type: "number", placeholder: "1.5",  unit: "%" },
+    ],
+  },
+  {
+    id: "anchor-routes", protocol: "anchor", label: "Compare Anchor Routes", tag: "Payments",
+    agentEndpoint: "/api/specialists/anchor-agent/execute",
+    fields: [
+      { key: "amount",      label: "Amount",   type: "number", placeholder: "500",  unit: "USDC" },
+      { key: "destination", label: "Currency", type: "select", options: ["NGN","KES","GHS","ZAR","USD"], defaultValue: "NGN" },
+    ],
+  },
+];
+
+// Maps template id → agent action string
+const TEMPLATE_ACTION: Record<string, string> = {
+  "blend-supply":    "supply",
+  "blend-rates":     "check-rates",
+  "soroswap-swap":   "swap",
+  "soroswap-quote":  "quote",
+  "aquarius-add":    "add-liquidity",
+  "aquarius-pool":   "read-pool",
+  "anchor-payment":  "execute-payment",
+  "anchor-routes":   "compare-routes",
+};
+
+const STATUS_LABELS: Record<TaskStatus, string> = {
+  pending:         "Pending",
+  funding_pending: "Awaiting Funding",
+  decomposing:     "Routing",
+  discovering:     "Discovering",
+  processing:      "Executing",
+  completed:       "Completed",
+  failed:          "Failed",
+};
+
+function abbrev(h: string, n = 8) {
+  return h ? `${h.slice(0, n)}…${h.slice(-4)}` : "";
+}
+
+function timeAgo(iso: string) {
+  const s = (Date.now() - new Date(iso).getTime()) / 1000;
+  if (s < 60) return `${Math.round(s)}s ago`;
+  if (s < 3600) return `${Math.round(s / 60)}m ago`;
+  return `${Math.round(s / 3600)}h ago`;
+}
+
+function detectProtocol(desc: string): Protocol | null {
+  const d = desc.toLowerCase();
+  if (d.includes("blend") || d.includes("supply") || d.includes("lending") || d.includes("yield")) return "blend";
+  if (d.includes("soroswap") || d.includes("swap") || d.includes("slippage")) return "soroswap";
+  if (d.includes("aquarius") || d.includes("liquidity") || d.includes("amm") || d.includes("pool")) return "aquarius";
+  if (d.includes("anchor") || d.includes("cross-border") || d.includes("payment") || d.includes("route")) return "anchor";
+  return null;
+}
+
+// ── Sub-components ─────────────────────────────────────────────────────────────
+
+function TraceEventRow({ ev, isLast }: { ev: ExecutionTraceEvent; isLast: boolean }) {
+  const isOk    = ev.eventType.includes("confirmed") || ev.eventType.includes("completed") || ev.eventType === "task_completed";
+  const isError = ev.eventType.includes("failed") || ev.eventType.includes("exceeded");
+  const isPending = !isOk && !isError;
+
+  return (
+    <div className="flex gap-3 items-start">
+      {/* connector */}
+      <div className="flex flex-col items-center" style={{ width: 20, flexShrink: 0 }}>
+        <div style={{
+          width: 7, height: 7, borderRadius: "50%", marginTop: 5, flexShrink: 0,
+          background: isError ? "#f87171" : isOk ? "#4ade80" : isPending ? "#fbbf24" : "#94a3b8",
+        }} />
+        {!isLast && <div style={{ width: 1, flex: 1, background: "rgba(255,255,255,0.07)", marginTop: 3 }} />}
+      </div>
+      <div style={{ flex: 1, minWidth: 0, paddingBottom: isLast ? 0 : 10 }}>
+        <div className="flex items-center gap-2">
+          <span style={{
+            fontSize: 9, fontWeight: 700, letterSpacing: "0.07em", textTransform: "uppercase",
+            color: "rgba(255,255,255,0.28)", fontFamily: "var(--font-mono)",
+          }}>#{ev.sequence}</span>
+          <span style={{
+            fontSize: 10, fontWeight: 600, color: "rgba(255,255,255,0.45)",
+            fontFamily: "var(--font-mono)",
+          }}>{ev.eventType}</span>
+        </div>
+        <p style={{ fontSize: 12, color: "rgba(255,255,255,0.65)", margin: "2px 0 0", lineHeight: 1.45 }}>
+          {ev.displayMessage}
+        </p>
+        {ev.eventHash && (
+          <p style={{ fontSize: 9.5, fontFamily: "var(--font-mono)", color: "rgba(255,255,255,0.18)", marginTop: 2 }}>
+            {abbrev(ev.eventHash, 12)}
+          </p>
+        )}
+      </div>
+    </div>
   );
 }
+
+function ReceiptCard({ receipt, taskId }: { receipt: ExecutionReceipt; taskId: string }) {
+  return (
+    <div style={{
+      background: "rgba(74,222,128,0.05)", border: "1px solid rgba(74,222,128,0.18)",
+      borderRadius: 10, padding: "14px 16px",
+    }}>
+      <div className="flex items-center justify-between mb-3">
+        <div className="flex items-center gap-2">
+          <ShieldCheck size={14} style={{ color: "#4ade80" }} />
+          <span style={{ fontSize: 11, fontWeight: 700, color: "#4ade80", letterSpacing: "0.06em", textTransform: "uppercase" }}>
+            Execution Receipt
+          </span>
+        </div>
+        <Link
+          href={`/receipts/${taskId}`}
+          style={{
+            fontSize: 10.5, color: "rgba(255,255,255,0.4)", display: "flex", alignItems: "center", gap: 4,
+            textDecoration: "none",
+          }}
+        >
+          Verify <ExternalLink size={10} />
+        </Link>
+      </div>
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "6px 16px" }}>
+        {[
+          { label: "Receipt hash", value: abbrev(receipt.receiptHash ?? "", 10) },
+          { label: "Trace root",   value: abbrev(receipt.traceRoot ?? "", 10) },
+          { label: "Total cost",   value: `$${(receipt.totalCost ?? 0).toFixed(4)} USDC` },
+          { label: "Agents",       value: String((receipt.agentVersionHashes ?? []).length) },
+          { label: "Spend cap",    value: receipt.spendCap != null ? `$${receipt.spendCap.toFixed(2)}` : "—" },
+          { label: "Payments",     value: String((receipt.paymentSummary ?? []).length) },
+        ].map(({ label, value }) => (
+          <div key={label}>
+            <p style={{ fontSize: 9.5, color: "rgba(255,255,255,0.25)", textTransform: "uppercase", letterSpacing: "0.06em", margin: 0 }}>{label}</p>
+            <p style={{ fontSize: 11.5, fontFamily: "var(--font-mono)", color: "rgba(255,255,255,0.75)", margin: "1px 0 0" }}>{value}</p>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+// ── Main page ──────────────────────────────────────────────────────────────────
 
 export default function Dashboard() {
-  // Core state
-  const [taskStatus, setTaskStatus] = useState<TaskStatus | null>(null);
-  const [taskId, setTaskId] = useState<string | null>(null);
-  const [subtasks, setSubtasks] = useState<Subtask[]>([]);
-  const [result, setResult] = useState<TaskResult | null>(null);
-  const [totalCost, setTotalCost] = useState(0);
-  const [estimatedCost, setEstimatedCost] = useState<number | null>(null);
-  const [walletBalance, setWalletBalance] = useState(0);
-  const [walletAssetCode, setWalletAssetCode] = useState("USDC");
-  const [walletAssetIssuer, setWalletAssetIssuer] = useState<string | null>(null);
-  const [nativeBalance, setNativeBalance] = useState<number | null>(null);
-  const [hasConfiguredAsset, setHasConfiguredAsset] = useState(true);
-  const [hasAnyRequestedAsset, setHasAnyRequestedAsset] = useState(true);
-  const [walletAddress, setWalletAddress] = useState("");
-  const [walletSource, setWalletSource] = useState<"connected-wallet" | "coordinator">("coordinator");
-  const [walletProvider, setWalletProvider] = useState<WalletProviderId | null>(null);
+  // Wallet
+  const [walletAddress, setWalletAddress]           = useState("");
+  const [walletBalance, setWalletBalance]           = useState(0);
+  const [walletAssetCode, setWalletAssetCode]       = useState("USDC");
+  const [walletSource, setWalletSource]             = useState<"connected-wallet" | "coordinator">("coordinator");
+  const [walletProvider, setWalletProvider]         = useState<WalletProviderId | null>(null);
   const [walletProviderName, setWalletProviderName] = useState<string | null>(null);
-  const [showWalletPicker, setShowWalletPicker] = useState(false);
-  const [walletOptions, setWalletOptions] = useState<Array<{
-    id: WalletProviderId;
-    name: string;
-    description: string;
-    availability: "available" | "extension-required" | "external";
-  }>>([]);
+  const [networkStatus, setNetworkStatus]           = useState<"connected" | "disconnected" | "loading">("loading");
   const [isWalletConnecting, setIsWalletConnecting] = useState(false);
-  const [isWalletOptionsLoading, setIsWalletOptionsLoading] = useState(false);
-  const [isWalletBalanceRefreshing, setIsWalletBalanceRefreshing] = useState(false);
-  const [walletError, setWalletError] = useState<string | null>(null);
-  const [networkStatus, setNetworkStatus] = useState<
-    "connected" | "disconnected" | "loading"
-  >("loading");
-  const [elapsedTime, setElapsedTime] = useState(0);
-  const [isSubmitting, setIsSubmitting] = useState(false);
-  const [spendCap, setSpendCap] = useState(10);
+  const [isBalanceRefreshing, setIsBalanceRefreshing] = useState(false);
+  const [showWalletPicker, setShowWalletPicker]     = useState(false);
+  const [walletOptions, setWalletOptions]           = useState<Array<{ id: WalletProviderId; name: string; description: string; availability: string }>>([]);
+  const [walletOptionsLoading, setWalletOptionsLoading] = useState(false);
+  const [walletError, setWalletError]               = useState<string | null>(null);
 
-  // Chat state
-  const [messages, setMessages] = useState<ChatMessageData[]>([]);
-  const [inputValue, setInputValue] = useState("");
-  const [attachments, setAttachments] = useState<Array<{ name: string; content: string; type: string }>>([]);
-  const fileInputRef = useRef<HTMLInputElement>(null);
-  const messagesEndRef = useRef<HTMLDivElement>(null);
-  const inputRef = useRef<HTMLTextAreaElement>(null);
-  const thinkingIdRef = useRef<string | null>(null);
+  // Mandate builder
+  const [selectedTemplate, setSelectedTemplate]     = useState<MandateTemplate | null>(null);
+  const [fieldValues, setFieldValues]               = useState<Record<string, string>>({});
+  const [spendCap, setSpendCap]                     = useState(10);
 
-  // Task history
-  const [taskHistory, setTaskHistory] = useState<Task[]>([]);
+  // Execution state
+  const [taskId, setTaskId]                         = useState<string | null>(null);
+  const [taskStatus, setTaskStatus]                 = useState<TaskStatus | null>(null);
+  const [traceEvents, setTraceEvents]               = useState<ExecutionTraceEvent[]>([]);
+  const [receipt, setReceipt]                       = useState<ExecutionReceipt | null>(null);
+  const [result, setResult]                         = useState<TaskResult | null>(null);
+  const [isSubmitting, setIsSubmitting]             = useState(false);
+  const [elapsedTime, setElapsedTime]               = useState(0);
+  const [specialists, setSpecialists]               = useState<Specialist[]>([]);
+
+  // History (left panel)
+  const [history, setHistory]                       = useState<Task[]>([]);
+
+  // Confirm modal
+  const [showConfirm, setShowConfirm]               = useState(false);
+
+  // SSE + polling refs
+  const sseRef                  = useRef<EventSource | null>(null);
+  const syncedRef               = useRef(0);
+  const walletReqRef            = useRef(0);
+  const traceEndRef             = useRef<HTMLDivElement>(null);
 
   // Session
-  const [sessionId, setSessionId] = useState<string | null>(getCurrentSession);
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  const [_sessionId, setSessionId]                  = useState<string | null>(getCurrentSession);
 
-  // Sidebar
-  const [sidebarOpen, setSidebarOpen] = useState(false);
-  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
-  const [specialists, setSpecialists] = useState<Specialist[]>([]);
-  const [selectedSpecialistId, setSelectedSpecialistId] = useState<string | null>(null);
-
-  // Confirmation modal
-  const [showConfirm, setShowConfirm] = useState(false);
-  const [pendingDescription, setPendingDescription] = useState("");
-
-  // Graph events for live execution DAG
-  const [graphEvents, setGraphEvents] = useState<ExecutionTraceEvent[]>([]);
-
-  // Server event tracking
-  const syncedEventsCount = useRef(0);
-  const walletBalanceRequestId = useRef(0);
-
-  // SSE connection for live trace events
-  const sseRef = useRef<EventSource | null>(null);
-
-  const selectedSpecialist = useMemo(
-    () => specialists.find((s) => s.id === selectedSpecialistId) ?? null,
-    [specialists, selectedSpecialistId]
-  );
-
-  // Scroll to bottom when messages change
+  // Auto-scroll trace feed
   useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [messages]);
+    traceEndRef.current?.scrollIntoView({ behavior: "smooth" });
+  }, [traceEvents]);
 
-  // Helper: add a thinking step to the current thinking block
-  const addThinkingStep = useCallback(
-    (step: ThinkingStep) => {
-      setMessages((prev) => {
-        const updated = [...prev];
-        const thinkingIdx = updated.findIndex(
-          (m) => m.id === thinkingIdRef.current
-        );
-        if (thinkingIdx !== -1) {
-          const thinking = { ...updated[thinkingIdx] };
-          thinking.thinkingSteps = [...(thinking.thinkingSteps || []), step];
-          updated[thinkingIdx] = thinking;
-        }
-        return updated;
-      });
-    },
-    []
-  );
+  // ── Wallet helpers ──────────────────────────────────────────────────────────
 
-  // Helper: finalize thinking block with duration
-  const finalizeThinking = useCallback(
-    (duration: number) => {
-      setMessages((prev) => {
-        const updated = [...prev];
-        const thinkingIdx = updated.findIndex(
-          (m) => m.id === thinkingIdRef.current
-        );
-        if (thinkingIdx !== -1) {
-          const thinking = { ...updated[thinkingIdx] };
-          thinking.thinkingDuration = duration;
-          updated[thinkingIdx] = thinking;
-        }
-        return updated;
-      });
-    },
-    []
-  );
+  const applyBalance = useCallback((data: WalletBalance, src: "connected-wallet" | "coordinator") => {
+    setWalletBalance(data.balance);
+    setWalletAssetCode(data.assetCode ?? "USDC");
+    setWalletAddress(data.address);
+    setWalletSource(data.source ?? src);
+  }, []);
 
-  // Auto-resize textarea
-  const handleTextareaInput = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
-    setInputValue(e.target.value);
-    e.target.style.height = "auto";
-    e.target.style.height = Math.min(e.target.scrollHeight, 160) + "px";
-  };
-
-  const applyWalletBalance = useCallback(
-    (data: WalletBalance, fallbackSource: "connected-wallet" | "coordinator") => {
-      setWalletBalance(data.balance);
-      setWalletAssetCode(data.assetCode ?? "USDC");
-      setWalletAssetIssuer(data.assetIssuer ?? null);
-      setNativeBalance(data.nativeBalance ?? null);
-      setHasConfiguredAsset(data.hasConfiguredAsset ?? true);
-      setHasAnyRequestedAsset(data.hasAnyRequestedAsset ?? true);
-      setWalletAddress(data.address);
-      setWalletSource(data.source ?? fallbackSource);
-    },
-    []
-  );
-
-  // Fetch wallet balance without blocking the connected account shell.
-  const fetchWalletBalance = useCallback(async (address?: string) => {
-    const requestId = walletBalanceRequestId.current + 1;
-    walletBalanceRequestId.current = requestId;
-    setIsWalletBalanceRefreshing(true);
-    if (address?.startsWith("G")) {
-      setNetworkStatus("connected");
-    } else {
-      setNetworkStatus("loading");
-    }
-
+  const fetchBalance = useCallback(async (addr?: string) => {
+    const rid = walletReqRef.current + 1;
+    walletReqRef.current = rid;
+    setIsBalanceRefreshing(true);
+    setNetworkStatus(addr?.startsWith("G") ? "connected" : "loading");
     try {
-      const data = await getWalletBalance(address);
-      if (requestId !== walletBalanceRequestId.current) return;
-      applyWalletBalance(data, address ? "connected-wallet" : "coordinator");
-      if (data.error) {
-        setWalletError(data.error);
-      } else {
-        writeCachedWalletBalance(data);
-        setWalletError(null);
-      }
+      const data = await getWalletBalance(addr);
+      if (rid !== walletReqRef.current) return;
+      applyBalance(data, addr ? "connected-wallet" : "coordinator");
+      if (!data.error) setWalletError(null);
       setNetworkStatus("connected");
-    } catch (error) {
-      if (requestId !== walletBalanceRequestId.current) return;
-      if (address?.startsWith("G")) {
-        setNetworkStatus("connected");
-        setWalletError(error instanceof Error ? error.message : "Balance refresh failed.");
-      } else {
-        setNetworkStatus("disconnected");
-      }
+    } catch {
+      if (rid !== walletReqRef.current) return;
+      setNetworkStatus(addr?.startsWith("G") ? "connected" : "disconnected");
     } finally {
-      if (requestId === walletBalanceRequestId.current) {
-        setIsWalletBalanceRefreshing(false);
-      }
+      if (rid === walletReqRef.current) setIsBalanceRefreshing(false);
     }
-  }, [applyWalletBalance]);
+  }, [applyBalance]);
 
-  const refreshActiveWalletBalance = useCallback(() => {
-    void fetchWalletBalance(
-      walletSource === "connected-wallet" && walletAddress.startsWith("G")
-        ? walletAddress
-        : undefined
-    );
-  }, [fetchWalletBalance, walletAddress, walletSource]);
-
-  const handleConnectWallet = useCallback(async (providerId: WalletProviderId) => {
+  const handleConnect = useCallback(async (id: WalletProviderId) => {
     setIsWalletConnecting(true);
     setWalletError(null);
-    setNetworkStatus("loading");
     try {
-      const wallet = await connectWallet(providerId);
-      setWalletProvider(wallet.provider);
-      setWalletProviderName(wallet.providerName);
+      const w = await connectWallet(id);
+      setWalletProvider(w.provider);
+      setWalletProviderName(w.providerName);
       setWalletSource("connected-wallet");
-      setWalletAddress(wallet.address);
+      setWalletAddress(w.address);
       setNetworkStatus("connected");
       setShowWalletPicker(false);
-      void fetchWalletBalance(wallet.address);
-    } catch (error) {
-      setWalletError(error instanceof Error ? error.message : "Wallet connection failed.");
+      void fetchBalance(w.address);
+    } catch (e) {
+      setWalletError(e instanceof Error ? e.message : "Connection failed");
       setNetworkStatus("disconnected");
     } finally {
       setIsWalletConnecting(false);
     }
-  }, [fetchWalletBalance]);
+  }, [fetchBalance]);
 
-  const handleDisconnectWallet = useCallback(async () => {
+  const handleDisconnect = useCallback(() => {
     clearCachedConnectedWallet();
-    setWalletProvider(null);
-    setWalletProviderName(null);
-    setWalletSource("coordinator");
-    setWalletError(null);
-    setWalletAddress("");
-    setWalletBalance(0);
-    setWalletAssetIssuer(null);
-    setNativeBalance(null);
+    setWalletProvider(null); setWalletProviderName(null);
+    setWalletSource("coordinator"); setWalletError(null);
+    setWalletAddress(""); setWalletBalance(0);
     setNetworkStatus("loading");
-    void fetchWalletBalance();
-  }, [fetchWalletBalance]);
+    void fetchBalance();
+  }, [fetchBalance]);
 
-  // Fetch task history
-  const fetchHistory = useCallback(async () => {
-    try {
-      const tasks = await getTaskHistory();
-      setTaskHistory(
-        tasks.filter((t) => t.status === "completed" || t.status === "failed")
-      );
-    } catch {
-      // silently ignore
-    }
-  }, []);
+  // ── Boot ────────────────────────────────────────────────────────────────────
 
   useEffect(() => {
-    const cachedWallet = getCachedConnectedWallet();
-    if (cachedWallet) {
-      setWalletProvider(cachedWallet.provider);
-      setWalletProviderName(cachedWallet.providerName);
-      setWalletAddress(cachedWallet.address);
+    const cached = getCachedConnectedWallet();
+    if (cached) {
+      setWalletProvider(cached.provider);
+      setWalletProviderName(cached.providerName);
+      setWalletAddress(cached.address);
       setWalletSource("connected-wallet");
       setNetworkStatus("connected");
-
-      const cachedBalance = readCachedWalletBalance(cachedWallet.address);
-      if (cachedBalance) {
-        applyWalletBalance(cachedBalance, "connected-wallet");
-      }
-
-      void fetchWalletBalance(cachedWallet.address);
+      void fetchBalance(cached.address);
     } else {
-      void fetchWalletBalance();
+      void fetchBalance();
     }
+    getOrInitSession().then(setSessionId).catch(() => {});
+    getSpecialists().then(setSpecialists).catch(() => {});
+    getTaskHistory()
+      .then((tasks) => setHistory(tasks.filter(t => t.status === "completed" || t.status === "failed")))
+      .catch(() => {});
+  }, [fetchBalance]); // eslint-disable-line react-hooks/exhaustive-deps
 
-    fetchHistory();
-    getSpecialists()
-      .then((data) => {
-        setSpecialists(data);
-        if (typeof window !== "undefined") {
-          const agentId = new URLSearchParams(window.location.search).get("agent");
-          if (agentId && data.some((s) => s.id === agentId)) {
-            setSelectedSpecialistId(agentId);
-          }
-        }
-      })
-      .catch(() => { });
-    // Ensure the session is initialised and cached in localStorage
-    getOrInitSession().then(setSessionId).catch(() => { });
-  }, [applyWalletBalance, fetchWalletBalance, fetchHistory]);
-
+  // Load wallet options when picker opens
   useEffect(() => {
-    if (!showWalletPicker || walletOptions.length > 0 || isWalletOptionsLoading) return;
-
-    setIsWalletOptionsLoading(true);
+    if (!showWalletPicker || walletOptions.length || walletOptionsLoading) return;
+    setWalletOptionsLoading(true);
     getWalletOptions()
       .then(setWalletOptions)
       .catch(() => setWalletOptions([]))
-      .finally(() => setIsWalletOptionsLoading(false));
-  }, [isWalletOptionsLoading, showWalletPicker, walletOptions.length]);
+      .finally(() => setWalletOptionsLoading(false));
+  }, [showWalletPicker, walletOptions.length, walletOptionsLoading]);
 
-  // Add a chat message
-  const addMessage = useCallback(
-    (
-      role: ChatMessageData["role"],
-      content: string,
-      status?: ChatMessageData["status"],
-      extra?: Partial<ChatMessageData>
-    ) => {
-      const msg: ChatMessageData = {
-        id: crypto.randomUUID(),
-        role,
-        content,
-        timestamp: new Date().toISOString(),
-        status,
-        ...extra,
-      };
-      setMessages((prev) => [...prev, msg]);
-    },
-    []
-  );
+  // ── Elapsed time while running ──────────────────────────────────────────────
 
-  // Sync legacy task events into the thinking block (fallback when no trace events)
-  const syncEvents = useCallback(
-    (events: TaskEvent[]) => {
-      if (!events || events.length <= syncedEventsCount.current) return;
-
-      const newEvents = events.slice(syncedEventsCount.current);
-      syncedEventsCount.current = events.length;
-
-      for (const event of newEvents) {
-        addThinkingStep({
-          message: event.message,
-          status: event.status,
-          type: event.type,
-          timestamp: event.timestamp,
-        });
-      }
-    },
-    [addThinkingStep]
-  );
-
-  // Sync structured trace events into the thinking block (preferred over legacy events)
-  const syncTraceEvents = useCallback(
-    (traceEvents: ExecutionTraceEvent[]) => {
-      if (!traceEvents || traceEvents.length <= syncedEventsCount.current) return;
-
-      const newEvents = traceEvents.slice(syncedEventsCount.current);
-      syncedEventsCount.current = traceEvents.length;
-
-      for (const event of newEvents) {
-        addThinkingStep(traceEventToThinkingStep(event));
-      }
-    },
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    [addThinkingStep]
-  );
-
-  // Elapsed time counter
   useEffect(() => {
-    if (
-      !taskStatus ||
-      taskStatus === "completed" ||
-      taskStatus === "failed" ||
-      taskStatus === "pending"
-    )
-      return;
-
-    const interval = setInterval(() => {
-      setElapsedTime((prev) => prev + 0.1);
-    }, 100);
-
-    return () => clearInterval(interval);
+    if (!taskStatus || taskStatus === "completed" || taskStatus === "failed" || taskStatus === "pending") return;
+    const iv = setInterval(() => setElapsedTime(p => p + 0.1), 100);
+    return () => clearInterval(iv);
   }, [taskStatus]);
 
-  // SSE subscription — streams trace events with ~1s latency while a task is active.
-  // The existing 2s polling useEffect remains active as fallback: syncTraceEvents
-  // checks syncedEventsCount so events processed by SSE are not re-added.
+  // ── SSE trace event stream ──────────────────────────────────────────────────
+
   useEffect(() => {
     if (!taskId) return;
-
     const sse = new EventSource(`/api/executions/${encodeURIComponent(taskId)}/events`);
     sseRef.current = sse;
-
     sse.onmessage = (e) => {
       try {
         const msg = JSON.parse(e.data) as { type: string; payload: unknown };
         if (msg.type === "trace_event") {
-          const event = msg.payload as ExecutionTraceEvent;
-          if (event.sequence >= syncedEventsCount.current) {
-            addThinkingStep(traceEventToThinkingStep(event));
-            syncedEventsCount.current = event.sequence + 1;
-            setGraphEvents((prev) => {
-              if (prev.some((ev) => ev.sequence === event.sequence)) return prev;
-              return [...prev, event].sort((a, b) => a.sequence - b.sequence);
+          const ev = msg.payload as ExecutionTraceEvent;
+          if (ev.sequence >= syncedRef.current) {
+            setTraceEvents(prev => {
+              if (prev.some(x => x.sequence === ev.sequence)) return prev;
+              return [...prev, ev].sort((a, b) => a.sequence - b.sequence);
             });
+            syncedRef.current = ev.sequence + 1;
           }
         } else if (msg.type === "task_complete") {
-          sse.close();
-          sseRef.current = null;
+          sse.close(); sseRef.current = null;
         }
-      } catch {
-        // ignore malformed messages
-      }
+      } catch { /* ignore */ }
     };
+    sse.onerror = () => { sse.close(); sseRef.current = null; };
+    return () => { sse.close(); sseRef.current = null; };
+  }, [taskId]);
 
-    sse.onerror = () => {
-      sse.close();
-      sseRef.current = null;
-    };
+  // ── Polling ─────────────────────────────────────────────────────────────────
 
-    return () => {
-      sse.close();
-      sseRef.current = null;
-    };
-  }, [taskId, addThinkingStep]);
-
-  // Estimate cost
-  const estimateCost = (description: string) => {
-    if (selectedSpecialist) {
-      setEstimatedCost(selectedSpecialist.priceUsdc);
-      return;
-    }
-
-    const lower = description.toLowerCase();
-    const hasCode =
-      lower.includes("code") ||
-      lower.includes("security") ||
-      lower.includes("audit");
-    const hasMarket =
-      lower.includes("market") ||
-      lower.includes("investment") ||
-      lower.includes("analysis");
-    const hasWriting =
-      lower.includes("memo") ||
-      lower.includes("report") ||
-      lower.includes("write");
-
-    let cost = 0;
-    if (hasCode) cost += 1.0;
-    if (hasMarket) cost += 0.75;
-    if (hasWriting) cost += 0.5;
-
-    setEstimatedCost(cost || 2.25);
-  };
-
-  // Poll task status
   useEffect(() => {
     if (!taskId) return;
-
-    const interval = setInterval(async () => {
+    const iv = setInterval(async () => {
       try {
         const task = await getTaskStatus(taskId);
         setTaskStatus(task.status);
-
-        if (task.subtasks) setSubtasks(task.subtasks);
-        if (task.totalCost) setTotalCost(task.totalCost);
-        if (task.traceEvents && task.traceEvents.length > 0) {
-          syncTraceEvents(task.traceEvents);
-          setGraphEvents(task.traceEvents);
-        } else if (task.events) {
-          syncEvents(task.events);
+        if (task.traceEvents?.length) {
+          setTraceEvents(task.traceEvents);
+          syncedRef.current = task.traceEvents.length;
         }
-
+        if (task.receipt) setReceipt(task.receipt);
         if (task.result) {
           setResult(task.result);
-          // Finalize thinking block
-          finalizeThinking(elapsedTime);
-          // Add result as a proper chat response — include receipt when available
-          addMessage("result", "Task completed successfully", "success", {
-            result: task.result,
-            taskId: taskId ?? undefined,
-            receipt: task.receipt ?? undefined,
-            walletAddress: task.walletAddress,
-            approvalStatus: task.approvalStatus,
-            approvedAt: task.approvedAt,
-            approvedByWallet: task.approvedByWallet,
-            approvalResultHash: task.approvalResultHash,
-          });
-          refreshActiveWalletBalance();
-          clearInterval(interval);
+          void fetchBalance(walletSource === "connected-wallet" ? walletAddress : undefined);
+          getTaskHistory()
+            .then(tasks => setHistory(tasks.filter(t => t.status === "completed" || t.status === "failed")))
+            .catch(() => {});
+          clearInterval(iv);
         }
         if (task.status === "failed") {
-          finalizeThinking(elapsedTime);
-          addMessage("system", "Task failed.", "error");
-          refreshActiveWalletBalance();
-          clearInterval(interval);
+          void fetchBalance(walletSource === "connected-wallet" ? walletAddress : undefined);
+          clearInterval(iv);
         }
-      } catch {
-        // Silently retry
-      }
+      } catch { /* retry */ }
     }, 2000);
+    return () => clearInterval(iv);
+  }, [taskId, fetchBalance, walletAddress, walletSource]);
 
-    return () => clearInterval(interval);
-  }, [taskId, addMessage, syncEvents, syncTraceEvents, refreshActiveWalletBalance]);
+  // ── Template selection ──────────────────────────────────────────────────────
 
-  // File attachment handler
-  const handleFilesSelected = (files: FileList | null) => {
-    if (!files) return;
-    Array.from(files).forEach((file) => {
-      if (file.size > 500_000) {
-        toast.error(`"${file.name}" is too large (max 500 KB).`);
-        return;
-      }
-      const reader = new FileReader();
-      reader.onload = (e) => {
-        const content = e.target?.result as string;
-        setAttachments((prev) => {
-          if (prev.some((a) => a.name === file.name)) return prev;
-          return [...prev, { name: file.name, content, type: file.type }];
-        });
-      };
-      reader.readAsText(file);
-    });
-    if (fileInputRef.current) fileInputRef.current.value = "";
-  };
+  function selectTemplate(tpl: MandateTemplate) {
+    const defaults: Record<string, string> = {};
+    tpl.fields.forEach(f => { if (f.defaultValue) defaults[f.key] = f.defaultValue; });
+    setSelectedTemplate(tpl);
+    setFieldValues(defaults);
+  }
 
-  // Step 1: User submits → show confirmation
-  const handleRequestSubmit = () => {
-    const description = inputValue.trim();
-    if (!description || isSubmitting) return;
-    if (walletSource !== "connected-wallet" || !walletAddress.startsWith("G")) {
-      setWalletError("Connect a Stellar wallet before submitting a Verix execution.");
-      setShowWalletPicker(true);
-      return;
-    }
-    estimateCost(description);
-    setPendingDescription(description);
-    setShowConfirm(true);
-  };
+  function resetExecution() {
+    setTaskId(null); setTaskStatus(null);
+    setTraceEvents([]); setReceipt(null);
+    setResult(null); setElapsedTime(0);
+    syncedRef.current = 0;
+    sseRef.current?.close(); sseRef.current = null;
+  }
 
-  // Step 2: User confirms → actually submit
-  const handleConfirmSubmit = async () => {
+  const canSubmit = selectedTemplate?.fields.every(f => !!fieldValues[f.key]) ?? false;
+
+  // ── Submit ──────────────────────────────────────────────────────────────────
+
+  async function handleConfirmSubmit() {
+    if (!selectedTemplate || !canSubmit) return;
     setShowConfirm(false);
-    const description = pendingDescription;
     setIsSubmitting(true);
+    resetExecution();
 
-    // Add user message to chat
-    addMessage("user", description);
-    setInputValue("");
-    setAttachments([]);
-
-    // Reset textarea height
-    if (inputRef.current) {
-      inputRef.current.style.height = "auto";
-    }
-
-    // Reset state for new task
-    setSubtasks([]);
-    setResult(null);
-    setTotalCost(0);
-    setElapsedTime(0);
-    setGraphEvents([]);
-    syncedEventsCount.current = 0;
-    sseRef.current?.close();
-    sseRef.current = null;
-
-    // Create thinking block
-    const thinkingId = crypto.randomUUID();
-    thinkingIdRef.current = thinkingId;
-    const thinkingMsg: ChatMessageData = {
-      id: thinkingId,
-      role: "thinking",
-      content: "",
-      timestamp: new Date().toISOString(),
-      thinkingSteps: [
-        {
-          message: "Received your task. Analyzing...",
-          status: "info",
-          type: "coordinator",
-          timestamp: new Date().toISOString(),
-        },
-      ],
-    };
-    setMessages((prev) => [...prev, thinkingMsg]);
+    // Build a human-readable description from the field values
+    const fieldSummary = selectedTemplate.fields
+      .map(f => `${f.label}: ${fieldValues[f.key]}${f.unit ? " " + f.unit : ""}`)
+      .join(", ");
+    const description = `${selectedTemplate.label}. ${fieldSummary}. Protocol: ${selectedTemplate.protocol}. Action: ${TEMPLATE_ACTION[selectedTemplate.id]}.`;
 
     try {
-      const response = await submitTask({
+      const res: CreateTaskResponse = await submitTask({
         description,
         spendCap,
         walletAddress,
         walletProvider: walletProviderName ?? walletProvider ?? undefined,
-        requestedSpecialistId: selectedSpecialist?.id,
-        attachments: attachments.length > 0 ? attachments : undefined,
       });
-      setTaskId(response.task_id);
+      setTaskId(res.task_id);
       setTaskStatus("decomposing");
-      setEstimatedCost(response.estimated_cost);
-      toast.success("Task submitted — execution started.");
-      // Stamp the taskId onto the thinking message so EscrowTimeline can load it
-      setMessages((prev) => {
-        const updated = [...prev];
-        const idx = updated.findIndex((m) => m.id === thinkingIdRef.current);
-        if (idx !== -1) updated[idx] = { ...updated[idx], taskId: response.task_id };
-        return updated;
-      });
-
-      addThinkingStep({
-        message: selectedSpecialist
-          ? `Marketplace agent pinned: ${selectedSpecialist.name}.`
-          : `Task decomposed into ${response.subtasks.length} subtask(s).`,
-        status: "success",
-        type: "coordinator",
-        timestamp: new Date().toISOString(),
-      });
-
-      response.subtasks.forEach((s) => {
-        addThinkingStep({
-          message: `Subtask identified: ${s}`,
-          status: "info",
-          type: "coordinator",
-          timestamp: new Date().toISOString(),
-        });
-      });
-    } catch (error) {
-      const msg = error instanceof Error ? error.message : "Unknown error";
-      addThinkingStep({
-        message: `Error: ${msg}`,
-        status: "error",
-        type: "system",
-        timestamp: new Date().toISOString(),
-      });
-      toast.error(`Task submission failed: ${msg}`);
+      toast.success("Mandate submitted — execution started.");
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : "Submission failed";
+      toast.error(msg);
       setTaskStatus("failed");
     } finally {
       setIsSubmitting(false);
     }
-  };
+  }
 
-  // Load past task
-  const handleViewHistory = async (historicTaskId: string) => {
-    try {
-      const task = await getTaskStatus(historicTaskId);
-      setTaskId(historicTaskId);
-      setTaskStatus(task.status);
+  // ── Derived state ────────────────────────────────────────────────────────────
 
-      if (task.subtasks) setSubtasks(task.subtasks);
-      if (task.totalCost) setTotalCost(task.totalCost);
-      if (task.result) setResult(task.result);
+  const isRunning = taskStatus && taskStatus !== "completed" && taskStatus !== "failed";
+  const isDone    = taskStatus === "completed" || taskStatus === "failed";
 
-      // Rebuild chat messages from stored events
-      const rebuiltMessages: ChatMessageData[] = [];
-
-      // Add the original user prompt
-      rebuiltMessages.push({
-        id: crypto.randomUUID(),
-        role: "user",
-        content: task.description,
-        timestamp: task.createdAt,
-      });
-
-      // Add events as a thinking block — prefer structured trace events over legacy blob
-      const hasTrace = task.traceEvents && task.traceEvents.length > 0;
-      const hasLegacy = task.events && task.events.length > 0;
-
-      if (hasTrace && task.traceEvents) {
-        const thinkingSteps: ThinkingStep[] = task.traceEvents.map(traceEventToThinkingStep);
-        const firstTime = new Date(task.traceEvents[0].timestamp).getTime();
-        const lastTime = new Date(task.traceEvents[task.traceEvents.length - 1].timestamp).getTime();
-        const duration = (lastTime - firstTime) / 1000;
-
-        rebuiltMessages.push({
-          id: crypto.randomUUID(),
-          role: "thinking",
-          content: "",
-          timestamp: task.traceEvents[0].timestamp,
-          thinkingSteps,
-          thinkingDuration: duration > 0 ? duration : undefined,
-          taskId: historicTaskId,
-        });
-      } else if (hasLegacy && task.events) {
-        const thinkingSteps: ThinkingStep[] = task.events.map((e) => ({
-          message: e.message,
-          status: e.status,
-          type: e.type,
-          timestamp: e.timestamp,
-        }));
-
-        const firstTime = new Date(task.events[0].timestamp).getTime();
-        const lastTime = new Date(
-          task.events[task.events.length - 1].timestamp
-        ).getTime();
-        const duration = (lastTime - firstTime) / 1000;
-
-        rebuiltMessages.push({
-          id: crypto.randomUUID(),
-          role: "thinking",
-          content: "",
-          timestamp: task.events[0].timestamp,
-          thinkingSteps,
-          thinkingDuration: duration > 0 ? duration : undefined,
-          taskId: historicTaskId,
-        });
-      }
-
-      // Add result if present — include receipt so the card can show proof status
-      if (task.result) {
-        rebuiltMessages.push({
-          id: crypto.randomUUID(),
-          role: "result",
-          content: "Task completed successfully",
-          status: "success",
-          timestamp: task.completedAt || task.createdAt,
-          result: task.result,
-          taskId: historicTaskId,
-          receipt: task.receipt ?? undefined,
-          walletAddress: task.walletAddress,
-          approvalStatus: task.approvalStatus,
-          approvedAt: task.approvedAt,
-          approvedByWallet: task.approvedByWallet,
-          approvalResultHash: task.approvalResultHash,
-        });
-      }
-
-      setMessages(rebuiltMessages);
-      setSidebarOpen(false);
-    } catch {
-      // ignore
-    }
-  };
-
-  // New Task
-  const handleNewTask = () => {
-    setTaskStatus(null);
-    setTaskId(null);
-    setMessages([]);
-    setSubtasks([]);
-    setResult(null);
-    setTotalCost(0);
-    setEstimatedCost(null);
-    setElapsedTime(0);
-    setInputValue("");
-    syncedEventsCount.current = 0;
-    thinkingIdRef.current = null;
-    sseRef.current?.close();
-    sseRef.current = null;
-    refreshActiveWalletBalance();
-    fetchHistory();
-    setSidebarOpen(false);
-    if (inputRef.current) {
-      inputRef.current.style.height = "auto";
-    }
-  };
-
-  // Handle Enter key to submit
-  const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
-    if (e.key === "Enter" && !e.shiftKey) {
-      e.preventDefault();
-      handleRequestSubmit();
-    }
-  };
-
-  const isWorking =
-    taskStatus &&
-    taskStatus !== "completed" &&
-    taskStatus !== "failed";
-  const isDone = taskStatus === "completed" || taskStatus === "failed";
-  const hasMessages = messages.length > 0;
-
-  // Status labels
-  const statusLabels: Record<TaskStatus, string> = {
-    pending: "Pending",
-    funding_pending: "Awaiting Escrow Funding",
-    decomposing: "Decomposing Task",
-    discovering: "Finding Specialists",
-    processing: "Processing",
-    completed: "Completed",
-    failed: "Failed",
-  };
+  // ── Render ───────────────────────────────────────────────────────────────────
 
   return (
-    <div className="h-screen flex overflow-hidden verix-shell">
-      {/* Sidebar */}
-      <ChatSidebar
-        taskHistory={taskHistory}
-        activeTaskId={taskId}
-        onNewTask={handleNewTask}
-        onSelectTask={handleViewHistory}
-        onDeleteTask={async (id) => {
-          try {
-            await deleteTask(id);
-            setTaskHistory((prev) => prev.filter((t) => t.id !== id));
-            if (taskId === id) {
-              setTaskId(null);
-              setMessages([]);
-              setResult(null);
-              setSubtasks([]);
-              setTaskStatus(null);
+    <div style={{
+      height: "100vh", display: "flex", flexDirection: "column",
+      background: "var(--color-dark-bg, #05070f)",
+      fontFamily: "var(--font-geist-sans, system-ui, sans-serif)",
+      color: "var(--color-dark-text, #eef0f8)",
+    }}>
+
+      {/* ── Top bar ──────────────────────────────────────────────────────────── */}
+      <header style={{
+        height: 52, flexShrink: 0, display: "flex", alignItems: "center",
+        justifyContent: "space-between", padding: "0 20px",
+        borderBottom: "1px solid rgba(255,255,255,0.07)",
+        background: "rgba(5,7,15,0.85)", backdropFilter: "blur(12px)",
+      }}>
+        {/* Logo + status */}
+        <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+          <Link href="/" style={{ display: "flex", alignItems: "center", textDecoration: "none" }}>
+            <Image src="/logo-mark.png" alt="Verix" width={976} height={344} priority style={{ height: 26, width: "auto", objectFit: "contain", display: "block" }} />
+          </Link>
+          <span style={{ width: 1, height: 16, background: "rgba(255,255,255,0.1)" }} />
+          <span style={{ fontSize: 12, color: "rgba(255,255,255,0.35)", letterSpacing: "0.02em" }}>
+            Execution Terminal
+          </span>
+          {isRunning && taskStatus && (
+            <>
+              <span style={{ width: 1, height: 16, background: "rgba(255,255,255,0.1)" }} />
+              <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                <span style={{ width: 6, height: 6, borderRadius: "50%", background: "#fbbf24", animation: "pulse 1.5s ease infinite" }} />
+                <span style={{ fontSize: 11.5, color: "rgba(255,255,255,0.55)" }}>
+                  {STATUS_LABELS[taskStatus]} · {elapsedTime.toFixed(1)}s
+                </span>
+              </div>
+            </>
+          )}
+          {isDone && taskStatus && (
+            <>
+              <span style={{ width: 1, height: 16, background: "rgba(255,255,255,0.1)" }} />
+              <span style={{
+                fontSize: 11, fontWeight: 700, letterSpacing: "0.06em", textTransform: "uppercase",
+                padding: "2px 8px", borderRadius: 999,
+                background: taskStatus === "completed" ? "rgba(74,222,128,0.1)" : "rgba(248,113,113,0.1)",
+                color: taskStatus === "completed" ? "#4ade80" : "#f87171",
+                border: `1px solid ${taskStatus === "completed" ? "rgba(74,222,128,0.25)" : "rgba(248,113,113,0.25)"}`,
+              }}>
+                {taskStatus === "completed" ? "Settled" : "Failed"}
+              </span>
+            </>
+          )}
+        </div>
+
+        {/* Right controls */}
+        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+          {/* Balance chip */}
+          <div style={{
+            display: "flex", alignItems: "center", gap: 6,
+            padding: "5px 10px", borderRadius: 8,
+            background: "rgba(255,255,255,0.05)", border: "1px solid rgba(255,255,255,0.09)",
+          }}>
+            {isBalanceRefreshing
+              ? <LoaderCircle size={11} style={{ animation: "spin 1s linear infinite", color: "rgba(255,255,255,0.3)" }} />
+              : <span style={{
+                  width: 6, height: 6, borderRadius: "50%",
+                  background: networkStatus === "connected" ? "#4ade80" : networkStatus === "loading" ? "#fbbf24" : "#f87171",
+                }} />
             }
-          } catch (e) {
-            console.error("Failed to delete task:", e);
-          }
-        }}
-        sessionId={sessionId}
-        walletBalance={walletBalance}
-        walletAssetCode={walletAssetCode}
-        walletAssetIssuer={walletAssetIssuer}
-        nativeBalance={nativeBalance}
-        hasConfiguredAsset={hasConfiguredAsset}
-        hasAnyRequestedAsset={hasAnyRequestedAsset}
-        walletAddress={walletAddress}
-        walletSource={walletSource}
-        walletProvider={walletProvider}
-        walletProviderName={walletProviderName}
-        isWalletConnecting={isWalletConnecting}
-        isWalletBalanceRefreshing={isWalletBalanceRefreshing}
-        onOpenWalletPicker={() => setShowWalletPicker(true)}
-        onDisconnectWallet={handleDisconnectWallet}
-        networkStatus={networkStatus}
-        isOpen={sidebarOpen}
-        onToggle={() => setSidebarOpen(!sidebarOpen)}
-        specialists={specialists}
-        collapsed={sidebarCollapsed}
-        onCollapseToggle={() => setSidebarCollapsed(!sidebarCollapsed)}
-      />
-
-      {/* Main Chat Area */}
-      <div className="flex-1 flex flex-col min-w-0">
-        {/* Top Bar */}
-        <header className="h-14 shrink-0 border-b border-border bg-surface flex items-center px-4 gap-3">
-          {/* Hamburger for mobile */}
-          <button
-            onClick={() => setSidebarOpen(true)}
-            className="lg:hidden w-8 h-8 rounded-lg flex items-center justify-center text-ink-muted hover:text-ink hover:bg-surface-tertiary transition-colors"
-            aria-label="Open navigation"
-          >
-            <Menu className="h-5 w-5" aria-hidden="true" />
-          </button>
-
-          <div className="flex-1 min-w-0">
-            {isWorking && taskStatus ? (
-              <div className="flex items-center gap-2">
-                <span className="w-2 h-2 rounded-full bg-accent animate-pulse-subtle" />
-                <span className="text-sm font-medium text-ink">
-                  {statusLabels[taskStatus]}
-                </span>
-                <span className="text-xs text-ink-muted font-mono">
-                  {elapsedTime.toFixed(1)}s
-                </span>
-              </div>
-            ) : isDone ? (
-              <div className="flex items-center gap-2">
-                <span
-                  className={`w-2 h-2 rounded-full ${taskStatus === "completed" ? "bg-success" : "bg-error"
-                    }`}
-                />
-                <span className="text-sm font-medium text-ink">
-                  {taskStatus === "completed"
-                    ? "Task Complete"
-                    : "Task Failed"}
-                </span>
-                {totalCost > 0 && (
-                  <span className="text-xs text-ink-muted font-mono">
-                    ${totalCost.toFixed(2)} USDC
-                  </span>
-                )}
-              </div>
-            ) : (
-              <span className="text-sm font-medium text-ink">Execution console</span>
-            )}
-          </div>
-
-          {/* Wallet badge */}
-          <div className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-surface-secondary border border-border">
-            {isWalletBalanceRefreshing ? (
-              <LoaderCircle className="h-3 w-3 animate-spin text-ink-muted" aria-hidden="true" />
-            ) : (
-              <span
-                className={`w-1.5 h-1.5 rounded-full ${networkStatus === "connected"
-                  ? "bg-success"
-                  : networkStatus === "loading"
-                    ? "bg-warning animate-pulse"
-                    : "bg-error"
-                  }`}
-              />
-            )}
-            <span className="text-xs font-mono font-semibold text-ink">
+            <span style={{ fontSize: 12, fontFamily: "var(--font-mono)", fontWeight: 600 }}>
               ${walletBalance.toFixed(2)}
-              <span className="ml-1 text-[10px] text-ink-muted">{walletAssetCode}</span>
+              <span style={{ marginLeft: 4, fontSize: 10, color: "rgba(255,255,255,0.35)" }}>{walletAssetCode}</span>
             </span>
           </div>
 
+          {/* Wallet button */}
           {walletSource === "connected-wallet" ? (
             <button
-              onClick={handleDisconnectWallet}
-              className="hidden h-8 items-center gap-1.5 border border-border bg-surface px-2.5 text-xs font-medium text-ink-secondary hover:border-border-strong hover:text-ink sm:inline-flex"
-              title="Disconnect wallet"
+              onClick={handleDisconnect}
+              style={{
+                display: "flex", alignItems: "center", gap: 6,
+                padding: "5px 10px", borderRadius: 8, fontSize: 12, fontWeight: 500,
+                background: "transparent", border: "1px solid rgba(255,255,255,0.09)",
+                color: "rgba(255,255,255,0.45)", cursor: "pointer",
+              }}
             >
-              <Unplug className="h-3.5 w-3.5" aria-hidden="true" />
-              Wallet
+              <Unplug size={12} />
+              {walletAddress ? `${walletAddress.slice(0, 5)}…${walletAddress.slice(-4)}` : "Wallet"}
             </button>
           ) : (
             <button
               onClick={() => setShowWalletPicker(true)}
               disabled={isWalletConnecting}
-              className="hidden h-8 items-center gap-1.5 border border-border bg-surface px-2.5 text-xs font-medium text-ink-secondary hover:border-border-strong hover:text-ink disabled:opacity-50 sm:inline-flex"
+              style={{
+                display: "flex", alignItems: "center", gap: 6,
+                padding: "5px 12px", borderRadius: 8, fontSize: 12, fontWeight: 600,
+                background: "#5b5fc7", border: "none", color: "#fff", cursor: "pointer",
+              }}
             >
-              {isWalletConnecting ? (
-                <LoaderCircle className="h-3.5 w-3.5 animate-spin" aria-hidden="true" />
-              ) : (
-                <Wallet className="h-3.5 w-3.5" aria-hidden="true" />
-              )}
+              {isWalletConnecting ? <LoaderCircle size={12} style={{ animation: "spin 1s linear infinite" }} /> : <Wallet size={12} />}
               Connect wallet
             </button>
           )}
 
-          {/* Settings link */}
-          <Link
-            href="/settings"
-            className="w-8 h-8 rounded-lg flex items-center justify-center text-ink-muted hover:text-ink hover:bg-surface-tertiary transition-colors"
-            title="Agent Settings"
-          >
-            <Settings className="h-4 w-4" aria-hidden="true" />
+          <Link href="/marketplace" style={{
+            display: "flex", alignItems: "center", gap: 5, padding: "5px 10px",
+            borderRadius: 8, fontSize: 12, color: "rgba(255,255,255,0.38)",
+            border: "1px solid rgba(255,255,255,0.08)", textDecoration: "none",
+            background: "transparent",
+          }}>
+            Agents
           </Link>
-        </header>
 
-        {/* Messages Area */}
-        <div className="flex-1 overflow-y-auto chat-scrollbar">
-          {!hasMessages ? (
-            /* Empty state - command center */
-            <div className="flex flex-col items-center justify-center h-full px-6 py-12">
-              <div className="mb-6">
-                <VerixMark size="lg" />
-              </div>
-              <p className="verix-label mb-3">Autonomous work command center</p>
-              <h1 className="text-3xl font-semibold text-ink mb-3 tracking-tight">
-                Start a verifiable execution.
-              </h1>
-              <p className="text-sm text-ink-secondary text-center max-w-xl mb-10 leading-6">
-                {selectedSpecialist
-                  ? `Submit work directly to ${selectedSpecialist.name}, capture a hash-chained trace, and produce a canonical receipt for verification.`
-                  : "Submit complex work, route it to specialist agents, capture a hash-chained trace, and produce a canonical receipt for local proof verification and escrow coordination."}
-              </p>
-
-              {/* Suggestion Chips */}
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 max-w-xl w-full">
-                {[
-                  {
-                    icon: "SEC",
-                    title: "Security Audit",
-                    desc: "Analyze codebase for security vulnerabilities",
-                  },
-                  {
-                    icon: "MRK",
-                    title: "Market Research",
-                    desc: "Research a company's market position and competitors",
-                  },
-                  {
-                    icon: "MEM",
-                    title: "Investment Memo",
-                    desc: "Create a professional investment analysis document",
-                  },
-                  {
-                    icon: "DAG",
-                    title: "Full Analysis",
-                    desc: "Audit code, research market, and write investment memo",
-                  },
-                ].map((chip) => (
-                  <button
-                    key={chip.title}
-                    onClick={() => {
-                      setInputValue(chip.desc);
-                      inputRef.current?.focus();
-                    }}
-                    className="text-left p-4 rounded-md border border-border bg-surface hover:border-border-strong transition-all group"
-                  >
-                    <div className="flex items-start gap-3">
-                      <span className="mt-0.5 inline-flex h-6 w-8 items-center justify-center border border-border bg-surface-secondary font-mono text-[9px] font-semibold text-ink-muted">
-                        {chip.icon}
-                      </span>
-                      <div>
-                        <p className="text-sm font-medium text-ink group-hover:text-accent transition-colors">
-                          {chip.title}
-                        </p>
-                        <p className="text-xs text-ink-muted mt-0.5">
-                          {chip.desc}
-                        </p>
-                      </div>
-                    </div>
-                  </button>
-                ))}
-              </div>
-
-              {/* How it works */}
-              <div className="mt-12 text-center">
-                <p className="verix-label mb-4">
-                  Execution pipeline
-                </p>
-                <div className="flex items-center gap-4 text-xs text-ink-muted">
-                  <span>Submit</span>
-                  <span className="text-ink-muted/30">/</span>
-                  <span>Route</span>
-                  <span className="text-ink-muted/30">/</span>
-                  <span>Trace</span>
-                  <span className="text-ink-muted/30">/</span>
-                  <span>Receipt</span>
-                  <span className="text-ink-muted/30">/</span>
-                  <span>Verify</span>
-                </div>
-              </div>
-            </div>
-          ) : (
-            /* Chat Thread */
-            <div className="max-w-3xl mx-auto px-4 py-6">
-              {messages.map((msg) => (
-                <ChatMessage key={msg.id} message={msg} />
-              ))}
-
-              {/* Typing indicator when working */}
-              {isWorking && (
-                <div className="flex gap-3 py-2 pr-16">
-                  <div className="w-8 h-8 rounded-full overflow-hidden shrink-0 bg-white border border-border">
-                    <span className="grid h-8 w-8 place-items-center bg-ink text-[10px] font-semibold text-white">VX</span>
-                  </div>
-                  <div className="px-4 py-3 bg-surface border border-border rounded-2xl rounded-bl-md">
-                    <div className="flex items-center gap-1">
-                      <span className="typing-dot w-1.5 h-1.5 rounded-full bg-ink-muted" />
-                      <span
-                        className="typing-dot w-1.5 h-1.5 rounded-full bg-ink-muted"
-                        style={{ animationDelay: "0.2s" }}
-                      />
-                      <span
-                        className="typing-dot w-1.5 h-1.5 rounded-full bg-ink-muted"
-                        style={{ animationDelay: "0.4s" }}
-                      />
-                    </div>
-                  </div>
-                </div>
-              )}
-
-              <div ref={messagesEndRef} />
-            </div>
-          )}
+          <Link href="/settings" style={{
+            width: 32, height: 32, borderRadius: 8, display: "flex",
+            alignItems: "center", justifyContent: "center",
+            color: "rgba(255,255,255,0.35)", border: "1px solid rgba(255,255,255,0.08)",
+            textDecoration: "none",
+          }}>
+            <Settings size={14} />
+          </Link>
         </div>
+      </header>
 
-        {/* Live Execution Graph — shown when a task is active */}
-        {taskId && graphEvents.length > 0 && (
-          <ExecutionGraph traceEvents={graphEvents} taskStatus={taskStatus} />
-        )}
+      {/* ── Body: three panels ──────────────────────────────────────────────── */}
+      <div style={{ flex: 1, display: "flex", overflow: "hidden" }}>
 
-        {/* Input Bar */}
-        <div className="shrink-0 border-t border-border bg-surface">
-          <div className="max-w-3xl mx-auto px-4 py-3">
-            {selectedSpecialist && (
-              <div className="mb-3 flex flex-col gap-2 rounded-md border border-border bg-surface-secondary px-3 py-2 sm:flex-row sm:items-center sm:justify-between">
-                <div className="min-w-0">
-                  <p className="verix-label mb-1">Marketplace agent selected</p>
-                  <div className="flex flex-wrap items-center gap-2 text-sm">
-                    <span className="font-semibold text-ink">{selectedSpecialist.name}</span>
-                    <span className="font-mono text-xs text-ink-muted">
-                      ${selectedSpecialist.priceUsdc.toFixed(2)} USDC
-                    </span>
-                    <span className="text-xs text-ink-muted">v{selectedSpecialist.currentVersion}</span>
-                  </div>
+        {/* ── LEFT: positions / history ─────────────────────────────────────── */}
+        <aside style={{
+          width: 240, flexShrink: 0, display: "flex", flexDirection: "column",
+          borderRight: "1px solid rgba(255,255,255,0.07)",
+          background: "var(--color-dark-subtle, #0a0c15)",
+          overflow: "hidden",
+        }}>
+          {/* Header */}
+          <div style={{ padding: "14px 16px 10px", borderBottom: "1px solid rgba(255,255,255,0.06)" }}>
+            <p style={{ fontSize: 9.5, fontWeight: 700, letterSpacing: "0.1em", textTransform: "uppercase", color: "rgba(255,255,255,0.25)", margin: 0 }}>
+              Executions
+            </p>
+          </div>
+
+          {/* List */}
+          <div style={{ flex: 1, overflowY: "auto", padding: "8px 8px" }}>
+            {/* Active task */}
+            {taskId && taskStatus && (
+              <div style={{
+                padding: "10px 10px", borderRadius: 8, marginBottom: 4,
+                background: "rgba(99,102,241,0.1)", border: "1px solid rgba(99,102,241,0.2)",
+              }}>
+                <div className="flex items-center gap-2 mb-1">
+                  {isRunning
+                    ? <span style={{ width: 6, height: 6, borderRadius: "50%", background: "#fbbf24", flexShrink: 0 }} />
+                    : <span style={{ width: 6, height: 6, borderRadius: "50%", background: taskStatus === "completed" ? "#4ade80" : "#f87171", flexShrink: 0 }} />
+                  }
+                  <span style={{ fontSize: 10.5, fontWeight: 700, color: "rgba(255,255,255,0.7)" }}>
+                    {isRunning ? STATUS_LABELS[taskStatus] : taskStatus === "completed" ? "Settled" : "Failed"}
+                  </span>
                 </div>
-                <button
-                  type="button"
-                  onClick={() => setSelectedSpecialistId(null)}
-                  className="self-start border border-border px-2 py-1 text-xs text-ink-muted hover:border-border-strong hover:text-ink sm:self-auto"
-                >
-                  Use coordinator
-                </button>
+                <p style={{ fontSize: 11, color: "rgba(255,255,255,0.35)", margin: 0, fontFamily: "var(--font-mono)" }}>
+                  {taskId.slice(0, 18)}…
+                </p>
+                {traceEvents.length > 0 && (
+                  <p style={{ fontSize: 10.5, color: "rgba(255,255,255,0.25)", margin: "4px 0 0" }}>
+                    {traceEvents.length} events
+                  </p>
+                )}
               </div>
             )}
-            <div className="mb-2 flex items-center justify-between gap-2 text-[10px] text-ink-muted">
-              <span>Golden path: marketplace hire &gt; escrow &gt; proof &gt; approval &gt; settlement</span>
-              <button
-                type="button"
-                onClick={() => {
-                  setInputValue(DEMO_GOLDEN_PROMPT);
-                  setSpendCap(DEMO_SPEND_CAP_USDC);
-                  inputRef.current?.focus();
-                }}
-                className="rounded border border-border px-2 py-1 font-medium text-ink hover:border-border-strong"
-              >
-                Load demo flow
-              </button>
+
+            {/* History */}
+            {history.length === 0 && !taskId && (
+              <p style={{ fontSize: 11, color: "rgba(255,255,255,0.2)", textAlign: "center", padding: "24px 8px" }}>
+                No executions yet
+              </p>
+            )}
+            {history.map(task => {
+              const proto = detectProtocol(task.description);
+              const meta  = proto ? PROTOCOL_META[proto] : null;
+              return (
+                <Link
+                  key={task.id}
+                  href={`/trace/${task.id}`}
+                  style={{
+                    display: "flex", alignItems: "flex-start", gap: 8,
+                    padding: "9px 10px", borderRadius: 8, marginBottom: 2,
+                    textDecoration: "none",
+                    background: task.id === taskId ? "rgba(99,102,241,0.08)" : "transparent",
+                    transition: "background 0.12s",
+                  }}
+                  onMouseEnter={e => (e.currentTarget.style.background = "rgba(255,255,255,0.04)")}
+                  onMouseLeave={e => (e.currentTarget.style.background = task.id === taskId ? "rgba(99,102,241,0.08)" : "transparent")}
+                >
+                  {meta && (
+                    <div style={{
+                      width: 22, height: 22, borderRadius: 6, flexShrink: 0,
+                      background: meta.bg, border: `1px solid ${meta.border}`,
+                      display: "flex", alignItems: "center", justifyContent: "center", color: meta.color, marginTop: 1,
+                    }}>
+                      {meta.icon}
+                    </div>
+                  )}
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <p style={{ fontSize: 11.5, fontWeight: 500, color: "rgba(255,255,255,0.6)", margin: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                      {task.description.slice(0, 40)}
+                    </p>
+                    <div style={{ display: "flex", alignItems: "center", gap: 6, marginTop: 2 }}>
+                      <span style={{ width: 5, height: 5, borderRadius: "50%", flexShrink: 0, background: task.status === "completed" ? "#4ade80" : "#f87171" }} />
+                      <span style={{ fontSize: 10, color: "rgba(255,255,255,0.22)" }}>{timeAgo(task.createdAt)}</span>
+                      {task.totalCost != null && (
+                        <span style={{ fontSize: 10, fontFamily: "var(--font-mono)", color: "rgba(255,255,255,0.22)" }}>
+                          ${task.totalCost.toFixed(2)}
+                        </span>
+                      )}
+                    </div>
+                  </div>
+                </Link>
+              );
+            })}
+          </div>
+
+          {/* Agent count footer */}
+          <div style={{ padding: "10px 16px", borderTop: "1px solid rgba(255,255,255,0.06)" }}>
+            <Link href="/marketplace" style={{ textDecoration: "none", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+              <span style={{ fontSize: 10.5, color: "rgba(255,255,255,0.25)" }}>
+                {specialists.length} agents online
+              </span>
+              <ChevronRight size={11} style={{ color: "rgba(255,255,255,0.2)" }} />
+            </Link>
+          </div>
+        </aside>
+
+        {/* ── CENTER: mandate builder + execution feed ───────────────────────── */}
+        <main style={{ flex: 1, display: "flex", flexDirection: "column", overflow: "hidden" }}>
+
+          {/* Mandate builder */}
+          <div style={{
+            flexShrink: 0, borderBottom: "1px solid rgba(255,255,255,0.07)",
+            background: "var(--color-dark-surface, #0f1120)",
+          }}>
+            {/* Protocol selector tabs */}
+            <div style={{
+              display: "flex", gap: 2, padding: "12px 20px 0",
+              borderBottom: "1px solid rgba(255,255,255,0.06)",
+            }}>
+              {(["blend","soroswap","aquarius","anchor"] as Protocol[]).map(proto => {
+                const m = PROTOCOL_META[proto];
+                const active = selectedTemplate?.protocol === proto;
+                return (
+                  <button
+                    key={proto}
+                    onClick={() => {
+                      const first = TEMPLATES.find(t => t.protocol === proto);
+                      if (first) selectTemplate(first);
+                    }}
+                    style={{
+                      display: "flex", alignItems: "center", gap: 6,
+                      padding: "7px 14px 9px", borderRadius: "8px 8px 0 0",
+                      fontSize: 12, fontWeight: 600, cursor: "pointer",
+                      background: active ? "rgba(255,255,255,0.04)" : "transparent",
+                      border: active ? `1px solid rgba(255,255,255,0.09)` : "1px solid transparent",
+                      borderBottom: active ? "1px solid var(--color-dark-surface, #0f1120)" : "1px solid transparent",
+                      color: active ? m.color : "rgba(255,255,255,0.3)",
+                      transition: "color 0.15s, background 0.15s",
+                      marginBottom: -1,
+                    }}
+                  >
+                    <span style={{ color: active ? m.color : "rgba(255,255,255,0.25)" }}>{m.icon}</span>
+                    {proto.charAt(0).toUpperCase() + proto.slice(1)}
+                  </button>
+                );
+              })}
             </div>
-            <div className="bg-surface border border-border rounded-md focus-within:border-border-strong transition-all">
-              {/* Attachment chips */}
-              {attachments.length > 0 && (
-                <div className="flex flex-wrap gap-1.5 px-3 pt-2.5 pb-1">
-                  {attachments.map((a) => (
-                    <span key={a.name} className="flex items-center gap-1 rounded border border-border bg-surface-secondary px-2 py-0.5 text-[11px] text-ink-muted max-w-[180px]">
-                      <Paperclip className="h-3 w-3 shrink-0" aria-hidden="true" />
-                      <span className="truncate">{a.name}</span>
-                      <button
-                        type="button"
-                        onClick={() => setAttachments((prev) => prev.filter((x) => x.name !== a.name))}
-                        className="ml-0.5 shrink-0 hover:text-ink"
-                        aria-label={`Remove ${a.name}`}
-                      >
-                        <X className="h-3 w-3" />
-                      </button>
+
+            {selectedTemplate ? (
+              <div style={{ padding: "16px 20px" }}>
+                {/* Action selector */}
+                <div style={{ display: "flex", gap: 6, marginBottom: 14, flexWrap: "wrap" }}>
+                  {TEMPLATES.filter(t => t.protocol === selectedTemplate.protocol).map(tpl => (
+                    <button
+                      key={tpl.id}
+                      onClick={() => selectTemplate(tpl)}
+                      style={{
+                        padding: "4px 12px", borderRadius: 999, fontSize: 11.5, fontWeight: 600, cursor: "pointer",
+                        background: tpl.id === selectedTemplate.id ? PROTOCOL_META[tpl.protocol].bg : "rgba(255,255,255,0.04)",
+                        border: `1px solid ${tpl.id === selectedTemplate.id ? PROTOCOL_META[tpl.protocol].border : "rgba(255,255,255,0.08)"}`,
+                        color: tpl.id === selectedTemplate.id ? PROTOCOL_META[tpl.protocol].color : "rgba(255,255,255,0.4)",
+                        transition: "all 0.15s",
+                      }}
+                    >
+                      {tpl.label}
+                    </button>
+                  ))}
+                </div>
+
+                {/* Fields row */}
+                <div style={{ display: "flex", gap: 10, alignItems: "flex-end", flexWrap: "wrap" }}>
+                  {selectedTemplate.fields.map(field => (
+                    <div key={field.key} style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+                      <label style={{
+                        fontSize: 9.5, fontWeight: 700, letterSpacing: "0.08em", textTransform: "uppercase",
+                        color: "rgba(255,255,255,0.3)",
+                      }}>
+                        {field.label}{field.unit ? <span style={{ fontWeight: 400, marginLeft: 3, color: "rgba(255,255,255,0.18)" }}>({field.unit})</span> : null}
+                      </label>
+                      {field.type === "select" ? (
+                        <select
+                          value={fieldValues[field.key] ?? ""}
+                          onChange={e => setFieldValues(p => ({ ...p, [field.key]: e.target.value }))}
+                          style={{
+                            padding: "7px 10px", borderRadius: 7, fontSize: 13, fontWeight: 500,
+                            background: "rgba(255,255,255,0.05)", border: "1px solid rgba(255,255,255,0.12)",
+                            color: "#eef0f8", outline: "none", minWidth: 110,
+                          }}
+                        >
+                          <option value="" disabled>Choose…</option>
+                          {field.options?.map(o => <option key={o} value={o}>{o}</option>)}
+                        </select>
+                      ) : (
+                        <div style={{ position: "relative" }}>
+                          <input
+                            type={field.type}
+                            value={fieldValues[field.key] ?? ""}
+                            placeholder={field.placeholder}
+                            onChange={e => setFieldValues(p => ({ ...p, [field.key]: e.target.value }))}
+                            style={{
+                              padding: "7px 10px", borderRadius: 7, fontSize: 13, fontWeight: 500,
+                              background: "rgba(255,255,255,0.05)", border: "1px solid rgba(255,255,255,0.12)",
+                              color: "#eef0f8", outline: "none", width: 110,
+                              paddingRight: field.unit ? 36 : 10,
+                            }}
+                          />
+                          {field.unit && (
+                            <span style={{
+                              position: "absolute", right: 8, top: "50%", transform: "translateY(-50%)",
+                              fontSize: 10, color: "rgba(255,255,255,0.25)", pointerEvents: "none",
+                            }}>{field.unit}</span>
+                          )}
+                        </div>
+                      )}
+                    </div>
+                  ))}
+
+                  {/* Spend cap */}
+                  <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+                    <label style={{ fontSize: 9.5, fontWeight: 700, letterSpacing: "0.08em", textTransform: "uppercase", color: "rgba(255,255,255,0.3)" }}>
+                      Spend cap (USDC)
+                    </label>
+                    <div style={{ display: "flex", gap: 4 }}>
+                      {[5, 10, 25, 50].map(cap => (
+                        <button
+                          key={cap}
+                          onClick={() => setSpendCap(cap)}
+                          style={{
+                            padding: "7px 10px", borderRadius: 7, fontSize: 12, fontWeight: 600,
+                            fontFamily: "var(--font-mono)", cursor: "pointer",
+                            background: spendCap === cap ? "rgba(99,102,241,0.2)" : "rgba(255,255,255,0.04)",
+                            border: `1px solid ${spendCap === cap ? "rgba(99,102,241,0.4)" : "rgba(255,255,255,0.1)"}`,
+                            color: spendCap === cap ? "#a5b4fc" : "rgba(255,255,255,0.35)",
+                            transition: "all 0.12s",
+                          }}
+                        >
+                          ${cap}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+
+                  {/* Execute button */}
+                  <button
+                    onClick={() => {
+                      if (!canSubmit || isSubmitting || isRunning) return;
+                      if (walletSource !== "connected-wallet") {
+                        setShowWalletPicker(true); return;
+                      }
+                      setShowConfirm(true);
+                    }}
+                    disabled={!canSubmit || isSubmitting || !!isRunning}
+                    style={{
+                      display: "flex", alignItems: "center", gap: 7,
+                      padding: "8px 20px", borderRadius: 8, fontSize: 13, fontWeight: 650,
+                      background: canSubmit && !isRunning ? "#5b5fc7" : "rgba(91,95,199,0.25)",
+                      border: "none", color: canSubmit && !isRunning ? "#fff" : "rgba(255,255,255,0.3)",
+                      cursor: canSubmit && !isRunning ? "pointer" : "not-allowed",
+                      transition: "background 0.15s", alignSelf: "flex-end",
+                    }}
+                  >
+                    {isSubmitting
+                      ? <><LoaderCircle size={13} style={{ animation: "spin 1s linear infinite" }} /> Submitting…</>
+                      : <>Execute mandate <ChevronRight size={13} /></>
+                    }
+                  </button>
+
+                  {/* New mandate button (when done) */}
+                  {isDone && (
+                    <button
+                      onClick={resetExecution}
+                      style={{
+                        display: "flex", alignItems: "center", gap: 6,
+                        padding: "8px 14px", borderRadius: 8, fontSize: 12, fontWeight: 600,
+                        background: "rgba(255,255,255,0.05)", border: "1px solid rgba(255,255,255,0.1)",
+                        color: "rgba(255,255,255,0.45)", cursor: "pointer", alignSelf: "flex-end",
+                      }}
+                    >
+                      <RefreshCw size={12} /> New mandate
+                    </button>
+                  )}
+                </div>
+              </div>
+            ) : (
+              /* No template selected yet */
+              <div style={{ padding: "24px 20px", textAlign: "center" }}>
+                <p style={{ fontSize: 13, color: "rgba(255,255,255,0.28)", margin: 0 }}>
+                  Select a protocol above to configure a mandate.
+                </p>
+              </div>
+            )}
+          </div>
+
+          {/* ── Execution feed ──────────────────────────────────────────────── */}
+          <div style={{ flex: 1, overflowY: "auto", padding: "20px 24px" }}>
+
+            {/* Idle state */}
+            {!taskId && (
+              <div style={{ display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", height: "100%", gap: 12 }}>
+                <div style={{
+                  width: 44, height: 44, borderRadius: 12,
+                  background: "rgba(99,102,241,0.1)", border: "1px solid rgba(99,102,241,0.2)",
+                  display: "flex", alignItems: "center", justifyContent: "center",
+                }}>
+                  <svg width="20" height="20" viewBox="0 0 24 24" fill="none">
+                    <path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z" stroke="#818cf8" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"/>
+                  </svg>
+                </div>
+                <p style={{ fontSize: 14, fontWeight: 600, color: "rgba(255,255,255,0.6)", margin: 0 }}>
+                  Ready to execute
+                </p>
+                <p style={{ fontSize: 12, color: "rgba(255,255,255,0.25)", margin: 0, textAlign: "center", maxWidth: 320, lineHeight: 1.6 }}>
+                  Select a protocol, configure the mandate fields, and submit.
+                  Every action is hash-chained and anchored on Soroban.
+                </p>
+                <div style={{
+                  marginTop: 8, display: "flex", alignItems: "center", gap: 10,
+                  fontSize: 11, color: "rgba(255,255,255,0.2)", fontFamily: "var(--font-mono)",
+                }}>
+                  {["Initialize","Route","Execute","Receipt","Anchor"].map((s, i, arr) => (
+                    <span key={s} style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                      {s}{i < arr.length - 1 && <span style={{ color: "rgba(255,255,255,0.1)" }}>→</span>}
                     </span>
                   ))}
                 </div>
-              )}
-
-              <div className="relative flex items-end gap-2 px-4 py-2">
-                {/* Hidden file input */}
-                <input
-                  ref={fileInputRef}
-                  type="file"
-                  multiple
-                  accept=".txt,.md,.csv,.json,.js,.ts,.tsx,.jsx,.py,.sh,.yaml,.yml,.toml,.xml,.html,.css"
-                  className="hidden"
-                  onChange={(e) => handleFilesSelected(e.target.files)}
-                />
-                {/* Attach button */}
-                <button
-                  type="button"
-                  onClick={() => fileInputRef.current?.click()}
-                  disabled={isSubmitting}
-                  title="Attach files"
-                  className="shrink-0 text-ink-muted hover:text-ink disabled:opacity-30 transition-colors mb-1.5"
-                >
-                  <Paperclip className="h-4 w-4" aria-hidden="true" />
-                </button>
-
-                <textarea
-                  ref={inputRef}
-                  value={inputValue}
-                  onChange={handleTextareaInput}
-                  onKeyDown={handleKeyDown}
-                  placeholder={
-                    walletSource === "connected-wallet"
-                      ? selectedSpecialist
-                        ? `Describe the task for ${selectedSpecialist.name}...`
-                        : "Describe your task..."
-                      : "Connect a wallet to submit an execution..."
-                  }
-                  rows={1}
-                  disabled={isSubmitting}
-                  className="flex-1 bg-transparent text-sm text-ink placeholder:text-ink-muted resize-none focus:outline-none py-1.5 max-h-40 chat-scrollbar"
-                />
-                <button
-                  onClick={handleRequestSubmit}
-                  disabled={!inputValue.trim() || isSubmitting}
-                  className="w-8 h-8 rounded-lg bg-accent text-white flex items-center justify-center shrink-0 hover:bg-accent-hover disabled:opacity-30 disabled:cursor-not-allowed transition-all mb-0.5"
-                >
-                  {isSubmitting ? (
-                    <LoaderCircle className="h-4 w-4 animate-spin" aria-hidden="true" />
-                  ) : (
-                    <ArrowUp className="h-4 w-4" aria-hidden="true" />
-                  )}
-                </button>
               </div>
-            </div>
-            <p className="text-[10px] text-ink-muted text-center mt-2">
-              Proof receipts verify workflow integrity; escrow settlement depends on configured Trustless Work mode.
+            )}
+
+            {/* Live trace feed */}
+            {taskId && (
+              <div style={{ maxWidth: 680 }}>
+                {/* Run header */}
+                <div style={{
+                  display: "flex", alignItems: "center", justifyContent: "space-between",
+                  marginBottom: 20,
+                }}>
+                  <div>
+                    <p style={{ fontSize: 10, fontWeight: 700, letterSpacing: "0.1em", textTransform: "uppercase", color: "rgba(255,255,255,0.25)", margin: "0 0 4px" }}>
+                      Execution trace
+                    </p>
+                    <p style={{ fontSize: 13, fontWeight: 600, color: "rgba(255,255,255,0.7)", margin: 0, fontFamily: "var(--font-mono)" }}>
+                      {taskId}
+                    </p>
+                  </div>
+                  <div style={{ display: "flex", gap: 8 }}>
+                    <Link
+                      href={`/trace/${taskId}`}
+                      style={{
+                        display: "flex", alignItems: "center", gap: 5, padding: "5px 10px",
+                        borderRadius: 7, fontSize: 11.5, color: "rgba(255,255,255,0.4)",
+                        border: "1px solid rgba(255,255,255,0.08)", textDecoration: "none",
+                        background: "rgba(255,255,255,0.03)",
+                      }}
+                    >
+                      Full trace <ExternalLink size={10} />
+                    </Link>
+                    {receipt && (
+                      <Link
+                        href={`/receipts/${taskId}`}
+                        style={{
+                          display: "flex", alignItems: "center", gap: 5, padding: "5px 10px",
+                          borderRadius: 7, fontSize: 11.5, color: "#4ade80",
+                          border: "1px solid rgba(74,222,128,0.25)", textDecoration: "none",
+                          background: "rgba(74,222,128,0.06)",
+                        }}
+                      >
+                        <ShieldCheck size={11} /> Receipt
+                      </Link>
+                    )}
+                  </div>
+                </div>
+
+                {/* Trace events */}
+                {traceEvents.length === 0 && isRunning && (
+                  <div style={{ display: "flex", alignItems: "center", gap: 10, color: "rgba(255,255,255,0.3)", fontSize: 13 }}>
+                    <LoaderCircle size={14} style={{ animation: "spin 1s linear infinite" }} />
+                    Waiting for first trace event…
+                  </div>
+                )}
+
+                <div style={{ display: "flex", flexDirection: "column" }}>
+                  {traceEvents.map((ev, i) => (
+                    <TraceEventRow key={ev.id ?? ev.sequence} ev={ev} isLast={i === traceEvents.length - 1} />
+                  ))}
+                  <div ref={traceEndRef} />
+                </div>
+
+                {/* Receipt card */}
+                {receipt && (
+                  <div style={{ marginTop: 24 }}>
+                    <ReceiptCard receipt={receipt} taskId={taskId} />
+                  </div>
+                )}
+
+                {/* Result summary */}
+                {result && (
+                  <div style={{
+                    marginTop: 16, padding: "14px 16px", borderRadius: 10,
+                    background: "rgba(255,255,255,0.03)", border: "1px solid rgba(255,255,255,0.08)",
+                  }}>
+                    <p style={{ fontSize: 10, fontWeight: 700, letterSpacing: "0.08em", textTransform: "uppercase", color: "rgba(255,255,255,0.25)", margin: "0 0 6px" }}>
+                      Result summary
+                    </p>
+                    <p style={{ fontSize: 13, color: "rgba(255,255,255,0.65)", margin: 0, lineHeight: 1.6 }}>
+                      {result.summary}
+                    </p>
+                    {result.totalCost > 0 && (
+                      <p style={{ fontSize: 11.5, fontFamily: "var(--font-mono)", color: "rgba(255,255,255,0.35)", marginTop: 8 }}>
+                        Total cost: ${result.totalCost.toFixed(4)} USDC · {result.totalTime.toFixed(1)}s
+                      </p>
+                    )}
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+        </main>
+
+        {/* ── RIGHT: proof / anchor status ─────────────────────────────────── */}
+        <aside style={{
+          width: 220, flexShrink: 0, display: "flex", flexDirection: "column",
+          borderLeft: "1px solid rgba(255,255,255,0.07)",
+          background: "var(--color-dark-subtle, #0a0c15)",
+        }}>
+          <div style={{ padding: "14px 14px 10px", borderBottom: "1px solid rgba(255,255,255,0.06)" }}>
+            <p style={{ fontSize: 9.5, fontWeight: 700, letterSpacing: "0.1em", textTransform: "uppercase", color: "rgba(255,255,255,0.25)", margin: 0 }}>
+              Proof status
             </p>
           </div>
-        </div>
+
+          <div style={{ flex: 1, overflowY: "auto", padding: "12px 14px" }}>
+            {!taskId ? (
+              <p style={{ fontSize: 11, color: "rgba(255,255,255,0.18)", margin: 0 }}>
+                No active execution
+              </p>
+            ) : (
+              <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+                {/* 5 constraints */}
+                {[
+                  { label: "Receipt integrity",   done: !!receipt },
+                  { label: "Spend cap",            done: !!receipt },
+                  { label: "Payment correctness",  done: isDone && taskStatus === "completed" },
+                  { label: "Agent membership",     done: !!(receipt?.agentVersionHashes?.length) },
+                  { label: "Trace commitment",     done: !!(receipt?.traceRoot) },
+                ].map(({ label, done }) => (
+                  <div key={label} style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                    <div style={{
+                      width: 16, height: 16, borderRadius: "50%", flexShrink: 0,
+                      background: done ? "rgba(74,222,128,0.15)" : "rgba(255,255,255,0.05)",
+                      border: `1px solid ${done ? "rgba(74,222,128,0.3)" : "rgba(255,255,255,0.1)"}`,
+                      display: "flex", alignItems: "center", justifyContent: "center",
+                      fontSize: 9, fontWeight: 700, color: done ? "#4ade80" : "rgba(255,255,255,0.2)",
+                    }}>
+                      {done ? "✓" : isRunning ? "·" : "–"}
+                    </div>
+                    <span style={{ fontSize: 11, color: done ? "rgba(255,255,255,0.6)" : "rgba(255,255,255,0.25)" }}>
+                      {label}
+                    </span>
+                  </div>
+                ))}
+
+                {receipt && (
+                  <>
+                    <div style={{ height: 1, background: "rgba(255,255,255,0.06)", margin: "4px 0" }} />
+                    <div>
+                      <p style={{ fontSize: 9.5, color: "rgba(255,255,255,0.22)", textTransform: "uppercase", letterSpacing: "0.07em", margin: "0 0 4px" }}>Trace root</p>
+                      <p style={{ fontSize: 10.5, fontFamily: "var(--font-mono)", color: "rgba(255,255,255,0.5)", margin: 0, wordBreak: "break-all" }}>
+                        {abbrev(receipt.traceRoot ?? "", 12)}
+                      </p>
+                    </div>
+                    <div>
+                      <p style={{ fontSize: 9.5, color: "rgba(255,255,255,0.22)", textTransform: "uppercase", letterSpacing: "0.07em", margin: "0 0 4px" }}>Receipt hash</p>
+                      <p style={{ fontSize: 10.5, fontFamily: "var(--font-mono)", color: "rgba(255,255,255,0.5)", margin: 0, wordBreak: "break-all" }}>
+                        {abbrev(receipt.receiptHash ?? "", 12)}
+                      </p>
+                    </div>
+                    <Link
+                      href={`/receipts/${taskId}`}
+                      style={{
+                        display: "flex", alignItems: "center", justifyContent: "center", gap: 5,
+                        padding: "7px 12px", borderRadius: 8, fontSize: 11.5, fontWeight: 600,
+                        background: "rgba(74,222,128,0.08)", border: "1px solid rgba(74,222,128,0.2)",
+                        color: "#4ade80", textDecoration: "none",
+                      }}
+                    >
+                      <ShieldCheck size={12} /> Verify receipt
+                    </Link>
+                  </>
+                )}
+
+                {/* Events count */}
+                {traceEvents.length > 0 && (
+                  <>
+                    <div style={{ height: 1, background: "rgba(255,255,255,0.06)", margin: "2px 0" }} />
+                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                      <span style={{ fontSize: 11, color: "rgba(255,255,255,0.25)" }}>Events</span>
+                      <span style={{ fontSize: 11.5, fontFamily: "var(--font-mono)", color: "rgba(255,255,255,0.5)" }}>
+                        {traceEvents.length}
+                      </span>
+                    </div>
+                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                      <span style={{ fontSize: 11, color: "rgba(255,255,255,0.25)" }}>Elapsed</span>
+                      <span style={{ fontSize: 11.5, fontFamily: "var(--font-mono)", color: "rgba(255,255,255,0.5)" }}>
+                        {elapsedTime.toFixed(1)}s
+                      </span>
+                    </div>
+                  </>
+                )}
+              </div>
+            )}
+          </div>
+        </aside>
       </div>
 
-      {/* Confirmation Modal */}
+      {/* ── Wallet picker modal ──────────────────────────────────────────────── */}
       {showWalletPicker && (
-        <div className="fixed inset-0 bg-ink/50 flex items-center justify-center z-50">
-          <div className="bg-surface rounded-xl border border-border p-5 max-w-lg w-full mx-4">
-            <div className="flex items-start justify-between gap-4 mb-4">
+        <div style={{
+          position: "fixed", inset: 0, zIndex: 60,
+          background: "rgba(0,0,0,0.6)", backdropFilter: "blur(4px)",
+          display: "flex", alignItems: "center", justifyContent: "center", padding: 16,
+        }}>
+          <div style={{
+            background: "var(--color-dark-surface, #0f1120)",
+            border: "1px solid rgba(255,255,255,0.1)", borderRadius: 14,
+            width: "100%", maxWidth: 420, padding: "24px",
+          }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 20 }}>
               <div>
-                <p className="verix-label mb-2">Wallet required</p>
-                <h3 className="text-lg font-semibold text-ink">Connect a Stellar wallet</h3>
-                <p className="text-sm text-ink-secondary mt-1">
-                  Verix uses your wallet as the execution payer identity and balance source.
+                <p style={{ fontSize: 10, fontWeight: 700, letterSpacing: "0.1em", textTransform: "uppercase", color: "rgba(255,255,255,0.3)", margin: "0 0 6px" }}>
+                  Stellar wallet
+                </p>
+                <h3 style={{ fontSize: 16, fontWeight: 650, color: "#eef0f8", margin: 0 }}>Connect to continue</h3>
+                <p style={{ fontSize: 12.5, color: "rgba(255,255,255,0.38)", margin: "6px 0 0", lineHeight: 1.5 }}>
+                  Your wallet is used as the payer identity for escrow and USDC settlement.
                 </p>
               </div>
-              <button
-                onClick={() => setShowWalletPicker(false)}
-                className="border border-border px-2 py-1 text-xs text-ink-muted hover:text-ink"
-              >
-                Close
+              <button onClick={() => setShowWalletPicker(false)} style={{ background: "none", border: "none", cursor: "pointer", color: "rgba(255,255,255,0.35)", padding: 4 }}>
+                <X size={16} />
               </button>
             </div>
 
             {walletError && (
-              <div className="bg-error/10 text-error text-sm p-3 rounded-lg mb-4">
+              <div style={{ background: "rgba(248,113,113,0.1)", border: "1px solid rgba(248,113,113,0.25)", borderRadius: 8, padding: "10px 14px", marginBottom: 14, fontSize: 12.5, color: "#f87171" }}>
                 {walletError}
               </div>
             )}
 
-            <div className="grid gap-2">
-              {isWalletOptionsLoading && walletOptions.length === 0 && (
-                <div className="flex items-center justify-center gap-2 border border-border bg-surface-secondary px-4 py-6 text-sm text-ink-muted">
-                  <LoaderCircle className="h-4 w-4 animate-spin" aria-hidden="true" />
-                  Detecting available Stellar wallets...
+            <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+              {walletOptionsLoading && (
+                <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "16px", color: "rgba(255,255,255,0.3)", fontSize: 13 }}>
+                  <LoaderCircle size={14} style={{ animation: "spin 1s linear infinite" }} />
+                  Detecting wallets…
                 </div>
               )}
-
-              {!isWalletOptionsLoading && walletOptions.length === 0 && (
+              {walletOptions.map(opt => (
                 <button
-                  type="button"
-                  onClick={() => {
-                    setWalletOptions([]);
-                    setIsWalletOptionsLoading(true);
-                    getWalletOptions()
-                      .then(setWalletOptions)
-                      .catch(() => setWalletOptions([]))
-                      .finally(() => setIsWalletOptionsLoading(false));
-                  }}
-                  className="border border-border bg-surface-secondary px-4 py-3 text-sm text-ink-secondary hover:border-border-strong hover:text-ink"
-                >
-                  Retry wallet detection
-                </button>
-              )}
-
-              {walletOptions.map((option) => (
-                <button
-                  key={option.id}
-                  onClick={() => handleConnectWallet(option.id)}
+                  key={opt.id}
+                  onClick={() => handleConnect(opt.id)}
                   disabled={isWalletConnecting}
-                  className="flex items-center justify-between gap-4 border border-border bg-surface-secondary px-4 py-3 text-left hover:border-border-strong disabled:opacity-50"
+                  style={{
+                    display: "flex", alignItems: "center", justifyContent: "space-between",
+                    padding: "12px 14px", borderRadius: 9, fontSize: 13, cursor: "pointer",
+                    background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.09)",
+                    color: "#eef0f8", textAlign: "left",
+                    transition: "border-color 0.15s, background 0.15s",
+                  }}
+                  onMouseEnter={e => { (e.currentTarget as HTMLButtonElement).style.borderColor = "rgba(255,255,255,0.18)"; }}
+                  onMouseLeave={e => { (e.currentTarget as HTMLButtonElement).style.borderColor = "rgba(255,255,255,0.09)"; }}
                 >
                   <div>
-                    <div className="text-sm font-semibold text-ink">{option.name}</div>
-                    <div className="text-xs text-ink-muted mt-0.5">{option.description}</div>
+                    <div style={{ fontWeight: 600 }}>{opt.name}</div>
+                    <div style={{ fontSize: 11.5, color: "rgba(255,255,255,0.35)", marginTop: 2 }}>{opt.description}</div>
                   </div>
-                  <span className={`text-[10px] uppercase tracking-wide ${
-                    option.availability === "available"
-                      ? "text-success"
-                      : option.availability === "external"
-                        ? "text-warning"
-                        : "text-ink-muted"
-                  }`}>
-                    {option.availability === "available"
-                      ? "detected"
-                      : option.availability === "external"
-                        ? "external"
-                        : "install"}
+                  <span style={{
+                    fontSize: 9.5, fontWeight: 700, letterSpacing: "0.07em", textTransform: "uppercase",
+                    color: opt.availability === "available" ? "#4ade80" : opt.availability === "external" ? "#fbbf24" : "rgba(255,255,255,0.3)",
+                  }}>
+                    {opt.availability === "available" ? "ready" : opt.availability === "external" ? "external" : "install"}
                   </span>
                 </button>
               ))}
@@ -1290,156 +1213,80 @@ export default function Dashboard() {
         </div>
       )}
 
-      {showConfirm && (
-        <div className="fixed inset-0 bg-ink/50 flex items-center justify-center z-50">
-          <div className="bg-surface rounded-xl border border-border p-6 max-w-md w-full mx-4 shadow-lg">
-            <h3 className="text-lg font-semibold text-ink mb-2">
-              Confirm Task Submission
-            </h3>
-            <p className="text-sm text-ink-secondary mb-4">
-              Review the details before autonomous agents begin working and
-              making payments.
+      {/* ── Confirm modal ────────────────────────────────────────────────────── */}
+      {showConfirm && selectedTemplate && (
+        <div style={{
+          position: "fixed", inset: 0, zIndex: 60,
+          background: "rgba(0,0,0,0.6)", backdropFilter: "blur(4px)",
+          display: "flex", alignItems: "center", justifyContent: "center", padding: 16,
+        }}>
+          <div style={{
+            background: "var(--color-dark-surface, #0f1120)",
+            border: "1px solid rgba(255,255,255,0.1)", borderRadius: 14,
+            width: "100%", maxWidth: 420, padding: "24px",
+          }}>
+            <p style={{ fontSize: 10, fontWeight: 700, letterSpacing: "0.1em", textTransform: "uppercase", color: "rgba(255,255,255,0.28)", margin: "0 0 8px" }}>
+              Confirm mandate
             </p>
+            <h3 style={{ fontSize: 16, fontWeight: 650, color: "#eef0f8", margin: "0 0 16px" }}>
+              {selectedTemplate.label}
+            </h3>
 
-            <div className="bg-surface-secondary rounded-lg border border-border p-4 space-y-3 mb-4">
-              <div className="flex justify-between text-sm">
-                <span className="text-ink-muted">Task</span>
-                <span className="text-ink text-right max-w-[60%] truncate">
-                  {pendingDescription}
-                </span>
-              </div>
-              {selectedSpecialist && (
-                <div className="flex justify-between text-sm">
-                  <span className="text-ink-muted">Selected Agent</span>
-                  <span className="text-ink text-right max-w-[60%] truncate">
-                    {selectedSpecialist.name} · v{selectedSpecialist.currentVersion}
+            <div style={{ background: "rgba(255,255,255,0.03)", border: "1px solid rgba(255,255,255,0.08)", borderRadius: 9, padding: "14px", marginBottom: 16 }}>
+              {selectedTemplate.fields.map(f => (
+                <div key={f.key} style={{ display: "flex", justifyContent: "space-between", marginBottom: 8, fontSize: 13 }}>
+                  <span style={{ color: "rgba(255,255,255,0.38)" }}>{f.label}</span>
+                  <span style={{ fontFamily: "var(--font-mono)", color: "rgba(255,255,255,0.75)", fontWeight: 600 }}>
+                    {fieldValues[f.key]}{f.unit ? " " + f.unit : ""}
                   </span>
                 </div>
-              )}
-              <div className="flex justify-between text-sm">
-                <span className="text-ink-muted">Estimated Cost</span>
-                <span className="font-mono font-semibold text-ink">
-                  ${estimatedCost?.toFixed(2) ?? "0.00"} USDC
-                </span>
+              ))}
+              <div style={{ borderTop: "1px solid rgba(255,255,255,0.07)", marginTop: 6, paddingTop: 10, display: "flex", justifyContent: "space-between", fontSize: 13 }}>
+                <span style={{ color: "rgba(255,255,255,0.38)" }}>Spend cap</span>
+                <span style={{ fontFamily: "var(--font-mono)", color: "#a5b4fc", fontWeight: 600 }}>${spendCap.toFixed(2)} USDC</span>
               </div>
-              <div className="flex justify-between text-sm">
-                <span className="text-ink-muted">Spend Cap</span>
-                <span className="font-mono text-ink">
-                  ${spendCap.toFixed(2)} USDC
+              <div style={{ display: "flex", justifyContent: "space-between", fontSize: 13, marginTop: 6 }}>
+                <span style={{ color: "rgba(255,255,255,0.38)" }}>Payer wallet</span>
+                <span style={{ fontFamily: "var(--font-mono)", color: "rgba(255,255,255,0.55)", fontSize: 11.5 }}>
+                  {walletAddress ? `${walletAddress.slice(0, 8)}…${walletAddress.slice(-4)}` : "—"}
                 </span>
-              </div>
-              <div className="flex justify-between text-sm">
-                <span className="text-ink-muted">Wallet Balance</span>
-                <span className="inline-flex items-center gap-1.5 font-mono text-ink">
-                  {isWalletBalanceRefreshing && (
-                    <LoaderCircle className="h-3 w-3 animate-spin text-ink-muted" aria-hidden="true" />
-                  )}
-                  ${walletBalance.toFixed(2)} {walletAssetCode}
-                </span>
-              </div>
-              {nativeBalance !== null && (
-                <div className="flex justify-between text-sm">
-                  <span className="text-ink-muted">Native Balance</span>
-                  <span className="font-mono text-ink">
-                    {nativeBalance.toFixed(2)} XLM
-                  </span>
-                </div>
-              )}
-              {walletAssetIssuer && (
-                <div className="flex justify-between gap-3 text-sm">
-                  <span className="text-ink-muted">Asset Issuer</span>
-                  <span className="truncate font-mono text-xs text-ink">
-                    {walletAssetIssuer}
-                  </span>
-                </div>
-              )}
-              <div className="flex justify-between text-sm">
-                <span className="text-ink-muted">Wallet Source</span>
-                <span className="text-ink">
-                  {walletSource === "connected-wallet" ? "Connected wallet" : "Coordinator fallback"}
-                </span>
-              </div>
-              <div className="flex justify-between text-sm">
-                <span className="text-ink-muted">Network</span>
-                <span className="text-ink">Stellar Testnet / Soroban</span>
               </div>
             </div>
 
-            {estimatedCost !== null && !isWalletBalanceRefreshing && estimatedCost > walletBalance && (
-              <div className="bg-error/10 text-error text-sm p-3 rounded-lg mb-4">
-                Insufficient balance. You need ${estimatedCost.toFixed(2)} but
-                only have ${walletBalance.toFixed(2)} {walletAssetCode}.
-                {!hasConfiguredAsset && hasAnyRequestedAsset
-                  ? " Your wallet has USDC, but it is not issued by the configured escrow asset issuer."
-                  : !hasConfiguredAsset && nativeBalance !== null
-                    ? ` Your wallet has ${nativeBalance.toFixed(2)} XLM, but no balance for the configured USDC issuer.`
-                    : ""}
-              </div>
-            )}
-
-            {!hasConfiguredAsset && hasAnyRequestedAsset && (
-              <div className="bg-warning/10 text-warning text-sm p-3 rounded-lg mb-4">
-                This wallet has {walletAssetCode}, but its issuer does not match the configured escrow asset issuer.
-                The balance is visible for review; live escrow funding may still require the configured asset.
-              </div>
-            )}
-
-            {walletError && (
-              <div className="bg-error/10 text-error text-sm p-3 rounded-lg mb-4">
-                {walletError}
-              </div>
-            )}
-
-            {estimatedCost !== null && estimatedCost > spendCap && (
-              <div className="bg-warning/10 text-warning text-sm p-3 rounded-lg mb-4">
-                Estimated cost exceeds your spend cap of $
-                {spendCap.toFixed(2)}.
-              </div>
-            )}
-
-            {/* Spend cap adjuster */}
-            <div className="mb-4">
-              <label className="text-xs text-ink-muted uppercase tracking-wide block mb-2">
-                Spend Cap (max per task)
-              </label>
-              <div className="flex items-center gap-2">
-                {[5, 10, 25, 50].map((cap) => (
-                  <button
-                    key={cap}
-                    onClick={() => setSpendCap(cap)}
-                    className={`px-3 py-1.5 text-xs font-mono rounded-lg border transition-colors ${spendCap === cap
-                      ? "bg-ink text-surface border-ink"
-                      : "bg-surface-secondary text-ink-secondary border-border hover:border-border-strong"
-                      }`}
-                  >
-                    ${cap}
-                  </button>
-                ))}
-              </div>
-            </div>
-
-            <div className="flex gap-3">
+            <div style={{ display: "flex", gap: 8 }}>
               <button
                 onClick={() => setShowConfirm(false)}
-                className="flex-1 px-4 py-2.5 text-sm font-medium text-ink-secondary border border-border rounded-lg hover:bg-surface-tertiary transition-colors"
+                style={{
+                  flex: 1, padding: "10px", borderRadius: 9, fontSize: 13, fontWeight: 600,
+                  background: "transparent", border: "1px solid rgba(255,255,255,0.1)",
+                  color: "rgba(255,255,255,0.4)", cursor: "pointer",
+                }}
               >
                 Cancel
               </button>
               <button
                 onClick={handleConfirmSubmit}
-                disabled={
-                  (estimatedCost !== null && !isWalletBalanceRefreshing && estimatedCost > walletBalance) ||
-                  isSubmitting ||
-                  walletSource !== "connected-wallet"
-                }
-                className="flex-1 px-4 py-2.5 text-sm font-medium bg-accent text-surface rounded-lg hover:bg-accent-hover disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+                style={{
+                  flex: 2, padding: "10px", borderRadius: 9, fontSize: 13, fontWeight: 650,
+                  background: "#5b5fc7", border: "none", color: "#fff", cursor: "pointer",
+                }}
               >
-                Approve & Execute
+                Execute →
               </button>
             </div>
           </div>
         </div>
       )}
+
+      <style>{`
+        @keyframes spin { to { transform: rotate(360deg); } }
+        @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:0.4} }
+        select option { background: #0f1120; color: #eef0f8; }
+        input[type=number]::-webkit-inner-spin-button { -webkit-appearance: none; }
+        ::-webkit-scrollbar { width: 4px; height: 4px; }
+        ::-webkit-scrollbar-track { background: transparent; }
+        ::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.1); border-radius: 4px; }
+      `}</style>
     </div>
   );
 }

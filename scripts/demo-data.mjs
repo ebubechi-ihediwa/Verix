@@ -73,6 +73,100 @@ export const DEMO_SPECIALISTS = [
     proofPolicy: "escrow-eligible",
     currentVersion: 1,
   },
+
+  // ── DeFi Agents ──────────────────────────────────────────────────────────────
+
+  {
+    id: "specialist_blend_agent",
+    name: "BlendYieldAgent",
+    description:
+      "Supplies and withdraws USDC from Blend lending pools. Monitors borrow and supply rates. Rebalances when yield thresholds are crossed. Produces verifiable receipts for every position change.",
+    endpoint: "/api/specialists/blend-agent/execute",
+    walletAddress: `G${"D".repeat(55)}`,
+    capabilities: [
+      "blend-supply",
+      "blend-withdraw",
+      "yield-monitoring",
+      "position-rebalancing",
+      "defi-execution",
+    ],
+    priceUsdc: 1.5,
+    reputation: 90,
+    totalJobs: 0,
+    status: "online",
+    aiModel: "claude",
+    proofPolicy: "escrow-eligible",
+    currentVersion: 1,
+  },
+
+  {
+    id: "specialist_soroswap_agent",
+    name: "SoroswapTradingAgent",
+    description:
+      "Executes token swaps on Soroswap with configurable slippage limits. Monitors price for condition-based execution. Commits quote vs. executed rates in verifiable receipts.",
+    endpoint: "/api/specialists/soroswap-agent/execute",
+    walletAddress: `G${"E".repeat(55)}`,
+    capabilities: [
+      "token-swaps",
+      "price-monitoring",
+      "slippage-control",
+      "soroswap-execution",
+      "defi-execution",
+    ],
+    priceUsdc: 1.25,
+    reputation: 90,
+    totalJobs: 0,
+    status: "online",
+    aiModel: "claude",
+    proofPolicy: "escrow-eligible",
+    currentVersion: 1,
+  },
+
+  {
+    id: "specialist_aquarius_agent",
+    name: "AquariusLiquidityAgent",
+    description:
+      "Manages AMM liquidity positions on Aquarius. Tracks fee accrual in real time. Rebalances based on configurable drift thresholds. All operations produce anchored receipts.",
+    endpoint: "/api/specialists/aquarius-agent/execute",
+    walletAddress: `G${"F".repeat(55)}`,
+    capabilities: [
+      "aquarius-liquidity",
+      "fee-monitoring",
+      "position-management",
+      "amm-rebalancing",
+      "defi-execution",
+    ],
+    priceUsdc: 1.5,
+    reputation: 90,
+    totalJobs: 0,
+    status: "online",
+    aiModel: "claude",
+    proofPolicy: "escrow-eligible",
+    currentVersion: 1,
+  },
+
+  {
+    id: "specialist_anchor_agent",
+    name: "AnchorPaymentAgent",
+    description:
+      "Routes cross-border USDC payments through optimal Stellar anchors. Compares rates and settlement times before executing. Delivers auditable logs with full receipt commitment for compliance.",
+    endpoint: "/api/specialists/anchor-agent/execute",
+    walletAddress: `G${"G".repeat(55)}`,
+    capabilities: [
+      "anchor-routing",
+      "payment-execution",
+      "rate-comparison",
+      "cross-border-payments",
+      "stellar-path-payments",
+    ],
+    priceUsdc: 1.0,
+    reputation: 90,
+    totalJobs: 0,
+    status: "online",
+    aiModel: "claude",
+    proofPolicy: "escrow-eligible",
+    currentVersion: 1,
+  },
 ];
 
 export function computeVersionHash(specialist, version = 1) {

@@ -28,13 +28,19 @@ import { sha256 } from "@/lib/hash";
 import { decrypt } from "@/lib/encryption";
 import { env } from "@/lib/env";
 
-const anthropic = new Anthropic({
-  apiKey: env.CLAUDE_API_KEY,
-});
+// Lazy-init: keys may be absent in demo mode; instantiate only when used.
+let _anthropic: Anthropic | null = null;
+let _openai: OpenAI | null = null;
 
-const openai = new OpenAI({
-  apiKey: env.OPENAI_API_KEY,
-});
+function getAnthropic(): Anthropic {
+  if (!_anthropic) _anthropic = new Anthropic({ apiKey: env.CLAUDE_API_KEY });
+  return _anthropic;
+}
+
+function getOpenAI(): OpenAI {
+  if (!_openai) _openai = new OpenAI({ apiKey: env.OPENAI_API_KEY });
+  return _openai;
+}
 
 const GROQ_BASE_URL = "https://api.groq.com/openai/v1";
 
@@ -782,7 +788,7 @@ export async function executeCoordinator(
 async function callRoutingLLM(prompt: string): Promise<string> {
   if (env.CLAUDE_API_KEY) {
     try {
-      const resp = await anthropic.messages.create({
+      const resp = await getAnthropic().messages.create({
         model: "claude-haiku-4-5-20251001",
         max_tokens: 500,
         messages: [{ role: "user", content: prompt }],
@@ -818,7 +824,7 @@ async function callRoutingLLM(prompt: string): Promise<string> {
   }
 
   console.log("[Coordinator] Routing via OpenAI");
-  const resp = await openai.chat.completions.create({
+  const resp = await getOpenAI().chat.completions.create({
     model: "gpt-4o-mini",
     max_tokens: 500,
     temperature: 0.1,
@@ -1005,7 +1011,7 @@ Only request delegation when it materially improves the result. The coordinator 
       console.log(`[${subtask.specialistName}] Using Claude (preferred)...`);
       const claudeClient = agentApiKey
         ? new Anthropic({ apiKey: agentApiKey })
-        : anthropic;
+        : getAnthropic();
       const message = await claudeClient.messages.create({
         model: "claude-3-5-sonnet-20241022",
         max_tokens: 1500,
@@ -1060,7 +1066,7 @@ Only request delegation when it materially improves the result. The coordinator 
 
     const openaiClient = (!preferClaude && !preferGroq && agentApiKey)
       ? new OpenAI({ apiKey: agentApiKey })
-      : openai;
+      : getOpenAI();
     const completion = await openaiClient.chat.completions.create({
       model: "gpt-4o",
       max_tokens: 1500,

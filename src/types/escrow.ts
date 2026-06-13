@@ -97,7 +97,7 @@ export interface FundEscrowResult {
   requiresSignature?: boolean;
 }
 
-export type EscrowSignaturePhase = "create" | "fund";
+export type EscrowSignaturePhase = "create" | "fund" | "release";
 
 export interface SubmitSignedEscrowTransactionResult {
   escrowId: string;
@@ -112,12 +112,16 @@ export interface ReleaseMilestoneInput {
   externalMilestoneId?: string;
   receiptHash?: string;
   releaseSigner?: string;    // Trustless Work signer address (coordinator)
+  walletMode?: boolean;      // when true, step 3 (release-funds) is returned unsigned for wallet signing
+  payerAddress?: string;     // payer's Stellar G... address — used as releaseSigner in wallet mode
 }
 
 export interface ReleaseMilestoneResult {
   status: MilestoneStatus;
   txHash?: string;
   releasedAt?: string;
+  unsignedReleaseTransaction?: string;  // populated when walletMode=true; caller must sign and submit
+  milestoneId?: string;
 }
 
 export interface GetEscrowResult {

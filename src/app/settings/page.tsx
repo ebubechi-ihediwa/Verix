@@ -191,16 +191,23 @@ export default function SettingsPage() {
   }
 
   async function handleDelete(id: string, specialistName: string) {
-    if (!confirm(`Remove ${specialistName} from the marketplace?`)) return;
-    try {
-      await deleteSpecialist(id);
-      toast.success(`${specialistName} removed from marketplace.`);
-      if (editingId === id) closeForm();
-      fetchSpecialists();
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : "Failed to remove specialist";
-      toast.error(msg);
-    }
+    toast(`Remove ${specialistName} from the marketplace?`, {
+      action: {
+        label: "Remove",
+        onClick: async () => {
+          try {
+            await deleteSpecialist(id);
+            toast.success(`${specialistName} removed from marketplace.`);
+            if (editingId === id) closeForm();
+            fetchSpecialists();
+          } catch (err) {
+            const msg = err instanceof Error ? err.message : "Failed to remove specialist";
+            toast.error(msg);
+          }
+        },
+      },
+      cancel: { label: "Cancel", onClick: () => {} },
+    });
   }
 
   return (

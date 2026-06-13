@@ -226,3 +226,26 @@ export async function retryEscrowRelease(
     method: "POST",
   });
 }
+
+export async function prepareMilestoneWalletRelease(
+  escrowId: string,
+  milestoneId: string,
+  payerAddress: string
+): Promise<{ status: string; milestoneId: string; unsignedReleaseTransaction?: string }> {
+  return authedRequest(`/api/escrow/${encodeURIComponent(escrowId)}/release-wallet`, {
+    method: "POST",
+    body: JSON.stringify({ milestoneId, payerAddress }),
+  });
+}
+
+export async function submitMilestoneWalletRelease(
+  escrowId: string,
+  milestoneId: string,
+  payerAddress: string,
+  signedXdr: string
+): Promise<{ status: string; milestoneId: string; txHash?: string }> {
+  return authedRequest(`/api/escrow/${encodeURIComponent(escrowId)}/release-wallet`, {
+    method: "POST",
+    body: JSON.stringify({ milestoneId, payerAddress, signedXdr }),
+  });
+}

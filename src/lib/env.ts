@@ -119,10 +119,6 @@ function buildEnv() {
     /** Private key for server-side Stellar XDR signing (coordinator wallet). */
     COORDINATOR_STELLAR_PRIVATE_KEY: process.env.COORDINATOR_STELLAR_PRIVATE_KEY,
 
-    CODE_AUDITOR_STELLAR_PUBLIC_KEY: process.env.CODE_AUDITOR_STELLAR_PUBLIC_KEY,
-    MARKET_ANALYST_STELLAR_PUBLIC_KEY: process.env.MARKET_ANALYST_STELLAR_PUBLIC_KEY,
-    CREATIVE_WRITER_STELLAR_PUBLIC_KEY: process.env.CREATIVE_WRITER_STELLAR_PUBLIC_KEY,
-
     /**
      * Optional secret that grants admin-level access to mutating APIs via
      * the X-Admin-Token request header. Useful for judge demos and manual

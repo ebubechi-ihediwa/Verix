@@ -1,6 +1,7 @@
 @import "tailwindcss";
 
 @theme inline {
+  /* ── App shell (light) ─────────────────────────────── */
   --color-ink: #111113;
   --color-ink-secondary: #4b4d52;
   --color-ink-muted: #8a8f98;
@@ -14,6 +15,41 @@
   --color-success: #16834f;
   --color-error: #c43b3b;
   --color-warning: #a66b00;
+
+  /* ── Brand primitives ──────────────────────────────── */
+  --color-brand-600: #4f46e5;
+  --color-brand-500: #6366f1;
+  --color-brand-400: #818cf8;
+  --color-brand-300: #a5b4fc;
+  --color-brand-200: #c4b5fd;
+  --color-violet-500: #8b5cf6;
+  --color-violet-400: #a78bfa;
+
+  /* ── Dark shell semantic tokens ───────────────────── */
+  --color-dark-bg:       #05070f;
+  --color-dark-subtle:   #0a0c15;
+  --color-dark-surface:  #0f1120;
+  --color-dark-elevated: #161829;
+  --color-dark-text:     #eef0f8;
+  --color-dark-text-secondary: #9ba3cc;
+  --color-dark-text-muted:     #6b72a3;
+  --color-dark-border:         rgba(255,255,255,0.10);
+  --color-dark-border-subtle:  rgba(255,255,255,0.06);
+
+  /* ── Spacing scale ─────────────────────────────────── */
+  --space-1: 4px;   --space-2: 8px;   --space-3: 12px;
+  --space-4: 16px;  --space-5: 20px;  --space-6: 24px;
+  --space-8: 32px;  --space-10: 40px; --space-12: 48px;
+  --space-16: 64px; --space-20: 80px; --space-24: 96px;
+
+  /* ── Border radius scale ───────────────────────────── */
+  --radius-sm: 6px;   --radius-md: 10px;
+  --radius-lg: 16px;  --radius-xl: 20px;
+  --radius-pill: 999px;
+
+  /* ── Shadow tokens (used in dark pages via CSS vars) ─ */
+  --shadow-brand:    0 0 32px rgba(99,102,241,0.40);
+  --shadow-brand-lg: 0 0 64px rgba(99,102,241,0.35), 0 8px 32px rgba(0,0,0,0.50);
 
   --font-sans: var(--font-geist-sans);
   --font-mono: var(--font-geist-mono);
@@ -168,6 +204,223 @@ button:disabled {
 
 .animate-pulse-subtle {
   animation: pulse-subtle 1.6s ease-in-out infinite;
+}
+
+/* ── Landing page: dark hero shell ─────────────────────────────── */
+.verix-hero-shell {
+  background: #080a0f;
+  min-height: 100svh;
+  overflow-x: hidden;
+}
+
+/* animated gradient mesh behind everything */
+.verix-hero-mesh {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background:
+    radial-gradient(ellipse 80% 60% at 50% -10%, rgba(99, 102, 241, 0.18) 0%, transparent 60%),
+    radial-gradient(ellipse 60% 50% at 80% 40%, rgba(139, 92, 246, 0.12) 0%, transparent 55%),
+    radial-gradient(ellipse 50% 40% at 10% 60%, rgba(59, 130, 246, 0.10) 0%, transparent 55%),
+    radial-gradient(ellipse 40% 30% at 60% 90%, rgba(16, 185, 129, 0.06) 0%, transparent 50%);
+  animation: mesh-shift 12s ease-in-out infinite alternate;
+}
+
+@keyframes mesh-shift {
+  from { opacity: 0.85; transform: scale(1) translateY(0); }
+  to   { opacity: 1;    transform: scale(1.04) translateY(-12px); }
+}
+
+/* dot-grid overlay */
+.verix-hero-grid {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background-image: radial-gradient(circle, rgba(255,255,255,0.045) 1px, transparent 1px);
+  background-size: 28px 28px;
+}
+
+/* glassmorphism card */
+.glass-card {
+  background: rgba(255, 255, 255, 0.035);
+  border: 1px solid rgba(255, 255, 255, 0.09);
+  border-radius: 16px;
+  backdrop-filter: blur(20px) saturate(1.4);
+  -webkit-backdrop-filter: blur(20px) saturate(1.4);
+  box-shadow:
+    0 0 0 1px rgba(255,255,255,0.04) inset,
+    0 24px 48px rgba(0, 0, 0, 0.45),
+    0 4px 16px rgba(0, 0, 0, 0.25);
+}
+
+/* dimmer variant — for smaller chips */
+.glass-chip {
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid rgba(255, 255, 255, 0.10);
+  border-radius: 999px;
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+}
+
+/* hero CTA primary */
+.hero-btn-primary {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  background: linear-gradient(135deg, #6366f1 0%, #8b5cf6 100%);
+  border: 1px solid rgba(255,255,255,0.15);
+  border-radius: 10px;
+  padding: 11px 22px;
+  font-size: 14px;
+  font-weight: 600;
+  color: #ffffff;
+  cursor: pointer;
+  transition: transform 160ms ease, box-shadow 160ms ease, filter 160ms ease;
+  box-shadow: 0 0 32px rgba(99, 102, 241, 0.35), 0 4px 12px rgba(0,0,0,0.4);
+  text-decoration: none;
+}
+.hero-btn-primary:hover {
+  filter: brightness(1.12);
+  transform: translateY(-1px);
+  box-shadow: 0 0 48px rgba(99, 102, 241, 0.5), 0 8px 20px rgba(0,0,0,0.4);
+}
+.hero-btn-primary:active {
+  transform: scale(0.98);
+}
+
+/* hero CTA secondary */
+.hero-btn-secondary {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  background: rgba(255,255,255,0.05);
+  border: 1px solid rgba(255,255,255,0.12);
+  border-radius: 10px;
+  padding: 11px 22px;
+  font-size: 14px;
+  font-weight: 500;
+  color: rgba(255,255,255,0.75);
+  cursor: pointer;
+  transition: background 160ms ease, color 160ms ease, transform 160ms ease;
+  backdrop-filter: blur(8px);
+  text-decoration: none;
+}
+.hero-btn-secondary:hover {
+  background: rgba(255,255,255,0.09);
+  color: #ffffff;
+  transform: translateY(-1px);
+}
+.hero-btn-secondary:active {
+  transform: scale(0.98);
+}
+
+/* glowing badge / label */
+.hero-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  background: rgba(99, 102, 241, 0.12);
+  border: 1px solid rgba(99, 102, 241, 0.30);
+  border-radius: 999px;
+  padding: 4px 12px;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: #a5b4fc;
+}
+
+/* animated glow pulse on badge dot */
+.hero-badge-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 999px;
+  background: #818cf8;
+  animation: glow-pulse 2s ease-in-out infinite;
+}
+
+@keyframes glow-pulse {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(129,140,248,0.6); opacity: 1; }
+  50%       { box-shadow: 0 0 0 5px rgba(129,140,248,0);  opacity: 0.7; }
+}
+
+/* feature tag chips in hero */
+.hero-feature-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  background: rgba(255,255,255,0.04);
+  border: 1px solid rgba(255,255,255,0.08);
+  border-radius: 8px;
+  padding: 6px 12px;
+  font-size: 12px;
+  font-weight: 500;
+  color: rgba(255,255,255,0.55);
+  transition: background 160ms ease, color 160ms ease, border-color 160ms ease;
+}
+.hero-feature-chip:hover {
+  background: rgba(255,255,255,0.07);
+  color: rgba(255,255,255,0.85);
+  border-color: rgba(255,255,255,0.14);
+}
+
+/* animated scan line that sweeps the terminal card */
+@keyframes scan-line {
+  0%   { transform: translateY(-100%); opacity: 0; }
+  10%  { opacity: 0.6; }
+  90%  { opacity: 0.6; }
+  100% { transform: translateY(400%); opacity: 0; }
+}
+.scan-line {
+  position: absolute;
+  left: 0;
+  right: 0;
+  height: 1px;
+  background: linear-gradient(90deg, transparent, rgba(99,102,241,0.5), rgba(139,92,246,0.5), transparent);
+  animation: scan-line 4s linear infinite;
+  pointer-events: none;
+}
+
+/* subtle float animation for the right panel */
+@keyframes float-panel {
+  0%, 100% { transform: translateY(0px); }
+  50%       { transform: translateY(-8px); }
+}
+.float-panel {
+  animation: float-panel 6s ease-in-out infinite;
+}
+
+/* gradient text */
+.gradient-text {
+  background: linear-gradient(135deg, #e0e7ff 0%, #c4b5fd 40%, #818cf8 100%);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+}
+
+/* stat counter glow */
+.stat-glow {
+  background: linear-gradient(135deg, #6366f1 0%, #8b5cf6 100%);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+}
+
+/* hero section fade-up entrance */
+@keyframes fade-up {
+  from { opacity: 0; transform: translateY(24px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+.fade-up-1 { animation: fade-up 0.7s ease-out 0.1s both; }
+.fade-up-2 { animation: fade-up 0.7s ease-out 0.22s both; }
+.fade-up-3 { animation: fade-up 0.7s ease-out 0.34s both; }
+.fade-up-4 { animation: fade-up 0.7s ease-out 0.46s both; }
+.fade-up-5 { animation: fade-up 0.7s ease-out 0.58s both; }
+
+/* divider line glow */
+.glow-divider {
+  height: 1px;
+  background: linear-gradient(90deg, transparent, rgba(99,102,241,0.4), rgba(139,92,246,0.4), transparent);
 }
 
 @keyframes chat-msg-enter {

@@ -2,7 +2,14 @@
 
 import { useEffect, useState } from "react";
 import { motion } from "framer-motion";
-import { getEscrowByTask, retryEscrowRelease, submitSignedEscrowTransaction, syncEscrowStatus } from "@/lib/api-client";
+import {
+  getEscrowByTask,
+  prepareMilestoneWalletRelease,
+  retryEscrowRelease,
+  submitMilestoneWalletRelease,
+  submitSignedEscrowTransaction,
+  syncEscrowStatus,
+} from "@/lib/api-client";
 import { getAuthorizedWallet, signWalletTransaction } from "@/lib/wallet-connect";
 import { stellarTxExplorerUrl } from "@/lib/stellar-config";
 import { isDemoEscrowId, trustlessWorkEscrowViewerUrl } from "@/lib/trustless-work";
@@ -155,6 +162,9 @@ export default function EscrowTimeline({ taskId }: EscrowTimelineProps) {
   const [syncing, setSyncing] = useState(false);
   const [syncStatus, setSyncStatus] = useState<{ at?: string; error?: string; synced?: boolean } | null>(null);
   const [retryingRelease, setRetryingRelease] = useState(false);
+  const [releaseSigningId, setReleaseSigningId] = useState<string | null>(null);
+  const [releaseSigningState, setReleaseSigningState] = useState<"idle" | "preparing" | "signing" | "submitted" | "failed">("idle");
+  const [releaseSigningError, setReleaseSigningError] = useState<string | null>(null);
 
   async function loadEscrow(cancelled = false) {
     try {
@@ -294,6 +304,48 @@ export default function EscrowTimeline({ taskId }: EscrowTimelineProps) {
     }
   }
 
+  async function handleWalletRelease(milestoneId: string) {
+    if (!escrow) return;
+    setReleaseSigningId(milestoneId);
+    setReleaseSigningState("preparing");
+    setReleaseSigningError(null);
+    try {
+      const wallet = await getAuthorizedWallet();
+      if (!wallet) throw new Error("Connect your Stellar wallet to sign the release transaction.");
+
+      // Phase A: prepare (server runs steps 1+2, returns unsigned step 3 XDR)
+      const prepared = await prepareMilestoneWalletRelease(escrow.id, milestoneId, wallet.address);
+      if (!prepared.unsignedReleaseTransaction) {
+        throw new Error("No release transaction returned from server.");
+      }
+
+      setReleaseSigningState("signing");
+      const signed = await signWalletTransaction(
+        prepared.unsignedReleaseTransaction,
+        wallet.address,
+        wallet.networkPassphrase
+      );
+
+      setReleaseSigningState("submitted");
+      // Phase B: submit signed XDR
+      const result = await submitMilestoneWalletRelease(
+        escrow.id,
+        milestoneId,
+        wallet.address,
+        signed.signedTxXdr
+      );
+      await loadEscrow(false);
+      setReleaseSigningState("idle");
+      setReleaseSigningId(null);
+      toast.success(result.txHash ? `Milestone released (tx: ${result.txHash.slice(0, 8)}…)` : "Milestone released.");
+    } catch (error) {
+      const msg = error instanceof Error ? error.message : "Wallet release signing failed.";
+      setReleaseSigningState("failed");
+      setReleaseSigningError(msg);
+      toast.error(msg);
+    }
+  }
+
   return (
     <motion.div
       initial={{ opacity: 0, y: 4 }}
@@ -419,7 +471,37 @@ export default function EscrowTimeline({ taskId }: EscrowTimelineProps) {
         {escrow.milestones.length === 0 ? (
           <p className="text-xs text-ink-muted py-3">No milestones yet.</p>
         ) : (
-          escrow.milestones.map((ms) => <MilestoneRow key={ms.id} ms={ms} />)
+          escrow.milestones.map((ms) => (
+            <div key={ms.id}>
+              <MilestoneRow ms={ms} />
+              {/* Wallet-mode release button for in_progress milestones when signing mode = wallet */}
+              {metadata.signingMode === "wallet" && ms.status === "in_progress" && (
+                <div className="pb-2.5">
+                  <div className="flex items-center justify-between gap-3">
+                    <p className="text-[10px] text-ink-muted">
+                      Wallet signature required to release payment.
+                    </p>
+                    <button
+                      type="button"
+                      onClick={() => handleWalletRelease(ms.id)}
+                      disabled={releaseSigningId === ms.id && releaseSigningState !== "idle" && releaseSigningState !== "failed"}
+                      className="shrink-0 rounded-md border border-ink bg-ink px-2.5 py-1 text-[10px] font-medium text-white disabled:opacity-50"
+                    >
+                      {releaseSigningId === ms.id
+                        ? releaseSigningState === "preparing" ? "Preparing…"
+                        : releaseSigningState === "signing" ? "Sign in wallet…"
+                        : releaseSigningState === "submitted" ? "Submitting…"
+                        : "Sign release"
+                        : "Sign release"}
+                    </button>
+                  </div>
+                  {releaseSigningId === ms.id && releaseSigningError && (
+                    <p className="mt-1 text-[9px] text-red-600">{releaseSigningError}</p>
+                  )}
+                </div>
+              )}
+            </div>
+          ))
         )}
       </div>
     </motion.div>
