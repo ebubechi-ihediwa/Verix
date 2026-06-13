@@ -9,6 +9,7 @@ import { Specialist } from "@/types/specialist";
 import { stellarAccountExplorerUrl } from "@/lib/stellar-config";
 import VerixMark from "@/components/VerixMark";
 import { WalletProviderId } from "@/lib/wallet-connect";
+import PositionMonitor from "@/components/PositionMonitor";
 
 interface ChatSidebarProps {
     taskHistory: Task[];
@@ -246,6 +247,11 @@ export default function ChatSidebar({
                                         ))}
                                     </>
                                 )}
+                            </div>
+
+                            {/* DeFi Position Monitor */}
+                            <div className="border-t border-white/10">
+                                <PositionMonitor activeTaskId={activeTaskId} />
                             </div>
 
                             {/* Specialists */}

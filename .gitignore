@@ -45,3 +45,8 @@ next-env.d.ts
 /artifacts
 /cache
 /typechain-types
+
+# source videos — only the extracted frames (public/sphere) are used/committed
+public/*.mp4
+public/*.mov
+public/*.webm

@@ -2,6 +2,7 @@ import { createHash } from "crypto";
 import { prisma } from "@/lib/db";
 import { DEMO_SPECIALISTS } from "@/lib/demo-scenario";
 import { AgentVersion, AiModelProvider, ProofPolicy, Specialist } from "@/types/specialist";
+import { env } from "@/lib/env";
 
 /**
  * Discovery Service
@@ -209,6 +210,9 @@ async function ensureSeeded(): Promise<void> {
 // ── Public API ────────────────────────────────────────────────────────────────
 
 export async function getAllSpecialists(): Promise<Specialist[]> {
+  if (!env.DATABASE_URL) {
+    return DEFAULT_SPECIALISTS.filter((s) => s.status !== "offline");
+  }
   await ensureSeeded();
   const rows = await prisma.specialist.findMany({
     where: { status: { not: "offline" } },
@@ -237,15 +241,21 @@ export async function getSpecialistSummariesForRouting(): Promise<{
 }
 
 export async function getSpecialistByName(name: string): Promise<Specialist | undefined> {
-  await ensureSeeded();
   const normalize = (s: string) => s.toLowerCase().replace(/\s+/g, "");
   const target = normalize(name);
+  if (!env.DATABASE_URL) {
+    return DEFAULT_SPECIALISTS.find((s) => normalize(s.name) === target);
+  }
+  await ensureSeeded();
   const rows = await prisma.specialist.findMany({ where: { status: { not: "offline" } } });
   const row = rows.find((r) => normalize(r.name) === target);
   return row ? toSpecialist(row) : undefined;
 }
 
 export async function getSpecialistById(id: string): Promise<Specialist | undefined> {
+  if (!env.DATABASE_URL) {
+    return DEFAULT_SPECIALISTS.find((s) => s.id === id);
+  }
   await ensureSeeded();
   const row = await prisma.specialist.findUnique({ where: { id } });
   return row ? toSpecialist(row) : undefined;
@@ -464,6 +474,24 @@ export async function getAgentVersions(specialistId: string): Promise<AgentVersi
 }
 
 export async function getActiveAgentVersion(specialistId: string): Promise<AgentVersion | null> {
+  if (!env.DATABASE_URL) {
+    const s = DEFAULT_SPECIALISTS.find((sp) => sp.id === specialistId);
+    if (!s) return null;
+    return {
+      id: `${specialistId}-v1`,
+      specialistId,
+      version: 1,
+      name: s.name,
+      description: s.description,
+      walletAddress: s.walletAddress,
+      capabilities: s.capabilities,
+      priceUsdc: s.priceUsdc,
+      proofPolicy: s.proofPolicy,
+      aiModel: s.aiModel ?? "openai",
+      versionHash: computeVersionHash(s.name, 1, s.priceUsdc, s.walletAddress, s.capabilities, s.proofPolicy, s.aiModel ?? "openai"),
+      createdAt: new Date().toISOString(),
+    };
+  }
   const specialist = await prisma.specialist.findUnique({
     where: { id: specialistId },
     select: { currentVersion: true },

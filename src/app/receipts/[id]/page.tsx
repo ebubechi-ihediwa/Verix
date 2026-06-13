@@ -3,11 +3,13 @@
 import { useState, useEffect, use } from "react";
 import Link from "next/link";
 import { motion } from "framer-motion";
+import { toast } from "sonner";
 import { getEscrowByTask, getExecutionReceipt, getProofByTask, verifyProof } from "@/lib/api-client";
 import { trustlessWorkEscrowViewerUrl } from "@/lib/trustless-work";
 import { ExecutionReceipt } from "@/types/trace";
 import { ProofRecord, ProofJournal } from "@/types/proof";
 import { Escrow, EscrowMilestone } from "@/types/escrow";
+import ClientVerifier from "@/components/ClientVerifier";
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -16,56 +18,24 @@ function abbrev(hash: string, n = 8) {
 }
 
 function ProofStatusBadge({ status }: { status: string }) {
-  const map: Record<string, { label: string; dot: string; bg: string; text: string; border: string }> = {
-    verified: {
-      label: "Verified",
-      dot: "bg-emerald-500",
-      bg: "bg-emerald-50",
-      text: "text-emerald-700",
-      border: "border-emerald-200",
-    },
-    proven: {
-      label: "Proof Ready",
-      dot: "bg-violet-500",
-      bg: "bg-violet-50",
-      text: "text-violet-700",
-      border: "border-violet-200",
-    },
-    running: {
-      label: "Generating…",
-      dot: "bg-amber-400 animate-pulse",
-      bg: "bg-amber-50",
-      text: "text-amber-700",
-      border: "border-amber-200",
-    },
-    pending: {
-      label: "Pending",
-      dot: "bg-amber-400",
-      bg: "bg-amber-50",
-      text: "text-amber-700",
-      border: "border-amber-200",
-    },
-    failed: {
-      label: "Failed",
-      dot: "bg-red-500",
-      bg: "bg-red-50",
-      text: "text-red-700",
-      border: "border-red-200",
-    },
+  const map: Record<string, { label: string; cls: string; pulse?: boolean }> = {
+    verified: { label: "Verified",    cls: "verix-status verix-status-success" },
+    proven:   { label: "Proof Ready", cls: "verix-status" },
+    running:  { label: "Generating…", cls: "verix-status verix-status-warning", pulse: true },
+    pending:  { label: "Pending",     cls: "verix-status verix-status-warning" },
+    failed:   { label: "Failed",      cls: "verix-status verix-status-error" },
   };
-  const s = map[status] ?? {
-    label: status,
-    dot: "bg-ink-muted",
-    bg: "bg-surface-tertiary",
-    text: "text-ink-muted",
-    border: "border-border",
-  };
+  const s = map[status] ?? { label: status, cls: "verix-status verix-status-neutral" };
   return (
     <span
-      className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-semibold border ${s.bg} ${s.text} ${s.border}`}
+      className={s.cls}
+      style={
+        status === "proven"
+          ? { color: "var(--color-brand-600)", background: "#ede9fe", borderColor: "#c4b5fd" }
+          : undefined
+      }
     >
-      <span className={`w-1.5 h-1.5 rounded-full ${s.dot}`} />
-      {s.label}
+      {s.pulse ? <span className="animate-pulse-subtle">{s.label}</span> : s.label}
     </span>
   );
 }
@@ -151,7 +121,7 @@ export default function ReceiptExplorerPage({
       setProof(updated);
       if (receipt) setReceipt({ ...receipt, status: "verified" });
     } catch (e) {
-      alert(e instanceof Error ? e.message : "Verification failed");
+      toast.error(e instanceof Error ? e.message : "Verification failed");
     } finally {
       setVerifying(false);
     }
@@ -412,6 +382,9 @@ export default function ReceiptExplorerPage({
             </p>
           </div>
         )}
+
+        {/* Client-side 5-constraint verifier */}
+        {receipt && <ClientVerifier receipt={receipt} />}
 
         {/* Disclaimer */}
         <p className="text-[10px] text-ink-muted text-center px-4">

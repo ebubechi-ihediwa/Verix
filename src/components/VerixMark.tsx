@@ -1,49 +1,32 @@
+import Image from "next/image";
+
 interface VerixMarkProps {
   size?: "sm" | "md" | "lg";
+  /** Kept for API compatibility; the logo PNG is transparent, so it sits on
+   *  both light and dark surfaces without needing inversion. */
   inverted?: boolean;
+  /** Kept for API compatibility — the wordmark is baked into the logo image. */
   showWordmark?: boolean;
 }
 
-const sizeClasses = {
-  sm: "h-6 w-6 text-[9px]",
-  md: "h-8 w-8 text-[11px]",
-  lg: "h-10 w-10 text-xs",
+// Rendered logo heights per size. logo-mark.png is tightly cropped (no padding),
+// so these map directly to the visible logo height.
+const sizeHeights = {
+  sm: 20,
+  md: 26,
+  lg: 32,
 };
 
-export default function VerixMark({
-  size = "md",
-  inverted = false,
-  showWordmark = true,
-}: VerixMarkProps) {
+export default function VerixMark({ size = "md" }: VerixMarkProps) {
+  const h = sizeHeights[size];
   return (
-    <div className="flex items-center gap-2">
-      <div
-        className={`${sizeClasses[size]} grid place-items-center border font-mono font-semibold ${
-          inverted
-            ? "border-white/20 bg-white text-ink"
-            : "border-ink bg-ink text-white"
-        }`}
-      >
-        VX
-      </div>
-      {showWordmark && (
-        <div className="leading-none">
-          <div
-            className={`text-sm font-semibold tracking-tight ${
-              inverted ? "text-white" : "text-ink"
-            }`}
-          >
-            Verix
-          </div>
-          <div
-            className={`mt-1 text-[9px] uppercase tracking-[0.16em] ${
-              inverted ? "text-white/35" : "text-ink-muted"
-            }`}
-          >
-            Execution OS
-          </div>
-        </div>
-      )}
-    </div>
+    <Image
+      src="/logo-mark.png"
+      alt="Verix"
+      width={976}
+      height={344}
+      priority
+      style={{ height: h, width: "auto", objectFit: "contain", display: "block" }}
+    />
   );
 }

@@ -34,7 +34,31 @@ export type TraceEventType =
   | "proof_generated"
   | "proof_generation_failed"
   | "proof_verified"
-  | "proof_verification_failed";
+  | "proof_verification_failed"
+  // Blend Protocol events
+  | "blend_rate_check"
+  | "blend_supply_initiated"
+  | "blend_supply_confirmed"
+  | "blend_withdraw_initiated"
+  | "blend_withdraw_confirmed"
+  | "blend_rebalance_triggered"
+  // Soroswap events
+  | "soroswap_quote_fetched"
+  | "soroswap_swap_initiated"
+  | "soroswap_swap_confirmed"
+  | "soroswap_price_monitored"
+  // Aquarius events
+  | "aquarius_pool_read"
+  | "aquarius_liquidity_added"
+  | "aquarius_liquidity_removed"
+  | "aquarius_fees_claimed"
+  | "aquarius_rebalance_triggered"
+  // Stellar Anchor / payment events
+  | "anchor_routes_queried"
+  | "anchor_route_selected"
+  | "payment_path_built"
+  | "payment_submitted"
+  | "payment_settled";
 
 export interface ExecutionTraceEvent {
   id: string;

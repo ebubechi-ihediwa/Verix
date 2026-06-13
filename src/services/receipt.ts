@@ -5,6 +5,7 @@ import { computeTraceRoot } from "@/services/trace";
 import { ExecutionReceipt, PaymentSummaryItem } from "@/types/trace";
 import { enqueueJob, startJob, completeJob, failJob } from "@/services/jobs";
 import { env } from "@/lib/env";
+import { demoReceiptStore } from "@/lib/demo-store";
 
 /**
  * Receipt Service — Issue #15
@@ -131,12 +132,15 @@ export async function generateReceipt(input: ReceiptInput): Promise<ExecutionRec
   // Collect versionHash values from the AgentVersion snapshots that were active
   // at invocation — these prove which exact agent metadata was used
   let agentVersionHashes: string[] = [];
-  if (agentVersionIds.length > 0) {
+  if (agentVersionIds.length > 0 && env.DATABASE_URL) {
     const versions = await prisma.agentVersion.findMany({
       where: { id: { in: agentVersionIds } },
       select: { versionHash: true },
     });
     agentVersionHashes = versions.map((v) => v.versionHash);
+  } else if (agentVersionIds.length > 0) {
+    // In demo mode agentVersionIds are synthetic hashes already
+    agentVersionHashes = agentVersionIds;
   }
 
   // The trace root is the eventHash of the last chained trace event
@@ -171,6 +175,26 @@ export async function generateReceipt(input: ReceiptInput): Promise<ExecutionRec
     registrySnapshotHash,
     paymentSummary,
   });
+
+  if (!env.DATABASE_URL) {
+    const receipt: ExecutionReceipt = {
+      id: `receipt-${taskId}`,
+      taskId,
+      taskInputHash,
+      agentVersionHashes,
+      spendCap,
+      totalCost,
+      traceRoot,
+      outputHash,
+      registrySnapshotHash,
+      paymentSummary,
+      receiptHash,
+      status: "proof_ready",
+      createdAt: new Date().toISOString(),
+    };
+    demoReceiptStore.set(taskId, receipt);
+    return receipt;
+  }
 
   const row = await prisma.executionReceipt.upsert({
     where: { taskId },
@@ -214,6 +238,9 @@ export async function generateReceipt(input: ReceiptInput): Promise<ExecutionRec
 }
 
 export async function getReceipt(taskId: string): Promise<ExecutionReceipt | null> {
+  if (!env.DATABASE_URL) {
+    return demoReceiptStore.get(taskId) ?? null;
+  }
   const row = await prisma.executionReceipt.findUnique({ where: { taskId } });
   return row ? toReceipt(row) : null;
 }

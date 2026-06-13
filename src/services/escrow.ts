@@ -401,13 +401,16 @@ class TrustlessWorkAdapter implements EscrowProvider {
   async releaseMilestone(input: ReleaseMilestoneInput): Promise<ReleaseMilestoneResult> {
     const type = env.TRUSTLESS_WORK_ESCROW_TYPE;
     const contractId = input.escrowId;
-    const releaseSigner = input.releaseSigner ?? this.signerAddress;
+    // In wallet mode, payer is the release signer (their wallet signs step 3)
+    const releaseSigner = input.walletMode && input.payerAddress
+      ? input.payerAddress
+      : (input.releaseSigner ?? this.signerAddress);
     const milestoneIndex = String(input.externalMilestoneId ?? input.milestoneId);
 
     let txHash: string | undefined;
 
     if (type === "multi-release") {
-      // Step 1: service provider marks milestone as Completed
+      // Step 1: service provider (coordinator) marks milestone as Completed — always server-signed
       const completedData = await this.request<{ unsignedTransaction?: string }>(
         "POST",
         "/escrow/multi-release/change-milestone-status",
@@ -423,7 +426,7 @@ class TrustlessWorkAdapter implements EscrowProvider {
         await this.signAndSend(completedData.unsignedTransaction);
       }
 
-      // Step 2: approver approves the milestone
+      // Step 2: approver (coordinator) approves the milestone — always server-signed
       const approveData = await this.request<{ unsignedTransaction?: string }>(
         "POST",
         "/escrow/multi-release/approve-milestone",
@@ -439,6 +442,16 @@ class TrustlessWorkAdapter implements EscrowProvider {
         "/escrow/multi-release/release-milestone-funds",
         { contractId, releaseSigner, milestoneIndex }
       );
+
+      if (input.walletMode) {
+        // Return unsigned XDR to the caller; they must wallet-sign and submit
+        return {
+          status: "pending",
+          unsignedReleaseTransaction: releaseData.unsignedTransaction,
+          milestoneId: input.milestoneId,
+        };
+      }
+
       txHash = await this.signAndSend(releaseData.unsignedTransaction);
     } else {
       const data = await this.request<{ unsignedTransaction: string }>(
@@ -446,6 +459,15 @@ class TrustlessWorkAdapter implements EscrowProvider {
         "/escrow/single-release/release-funds",
         { contractId, releaseSigner }
       );
+
+      if (input.walletMode) {
+        return {
+          status: "pending",
+          unsignedReleaseTransaction: data.unsignedTransaction,
+          milestoneId: input.milestoneId,
+        };
+      }
+
       txHash = await this.signAndSend(data.unsignedTransaction);
     }
 
@@ -562,9 +584,15 @@ export async function submitSignedEscrowTransaction(
     ...metadata,
     ...(phase === "create"
       ? { createTxHash: txHash, createSignedAt: new Date().toISOString() }
-      : { fundTxHash: txHash, fundingSignedAt: new Date().toISOString() }),
+      : phase === "fund"
+      ? { fundTxHash: txHash, fundingSignedAt: new Date().toISOString() }
+      : { releaseWalletTxHash: txHash, releaseSignedAt: new Date().toISOString() }),
     lastSignedPhase: phase,
   };
+  // release phase: the caller (release-wallet route) handles milestone status update
+  if (phase === "release") {
+    return { escrowId, phase, status: escrow.status as EscrowStatus, txHash };
+  }
 
   if (phase === "create" && provider.fundEscrow && activeContractId) {
     const funding = await provider.fundEscrow({
@@ -923,7 +951,7 @@ export async function prepareEscrowForExecution(input: {
 
     let finalStatus = created.status;
     let fundTxHash: string | undefined;
-    let unsignedCreateTransaction = created.unsignedTransaction;
+    const unsignedCreateTransaction = created.unsignedTransaction;
     let unsignedFundTransaction: string | undefined;
 
     await prisma.escrow.update({
