@@ -280,9 +280,11 @@ export async function verifyProof(proofId: string): Promise<ProofRecord> {
     where: { taskId: proof.taskId },
   });
   if (receiptForAnchor) {
-    import("@/services/anchor")
-      .then(({ anchorVerifiedReceipt }) =>
-        anchorVerifiedReceipt({
+    // Receipt → proof → anchor. anchorReceipt is idempotent and non-fatal: it
+    // records anchorStatus and never throws, so anchoring can't fail the flow.
+    import("@/services/receipt-anchor")
+      .then(({ anchorReceipt }) =>
+        anchorReceipt({
           id: receiptForAnchor.id,
           taskId: receiptForAnchor.taskId,
           taskInputHash: receiptForAnchor.taskInputHash,

@@ -23,6 +23,7 @@ import { appendReputationEvent } from "@/services/reputation";
 import { recordTraceEvent } from "@/services/trace";
 import { generateReceipt } from "@/services/receipt";
 import { buildPinnedSubtask } from "@/services/routing";
+import { runBlendYieldStub } from "@/services/agents/blend-yield";
 import { prepareEscrowForExecution } from "@/services/escrow";
 import { sha256 } from "@/lib/hash";
 import { decrypt } from "@/lib/encryption";
@@ -376,7 +377,7 @@ async function stageExecute(
 
     let payment: Payment;
     try {
-      payment = await createPayment(taskId, subtask.specialistName!, subtask.cost!);
+      payment = await createPayment(taskId, subtask.specialistName!, subtask.cost!, subtask.specialistId);
     } catch (err) {
       await pushEvent(taskId, "system", `${subtask.specialistName} failed: ${err instanceof Error ? err.message : "Unknown error"}`, "error");
       subtasks[i] = { ...subtask, status: "failed" };
@@ -515,7 +516,7 @@ async function stageExecute(
               ).catch(() => { /* non-fatal */ });
 
               try {
-                const childPayment = await createPayment(taskId, child.specialistName!, child.cost!);
+                const childPayment = await createPayment(taskId, child.specialistName!, child.cost!, child.specialistId);
                 payments.push(childPayment);
                 totalSpent += child.cost || 0;
                 const childResult = await executeSpecialist(
@@ -969,6 +970,18 @@ async function executeSpecialist(
   originalTask: string
 ): Promise<SpecialistResult> {
   const specialist = await getSpecialistByName(subtask.specialistName!);
+
+  // Typed agent branch: deterministic Blend yield STUB (Sprint 5B). Produces a
+  // real deliverable/trace/receipt without any LLM call or on-chain action.
+  if (specialist?.agentType === "blend_yield") {
+    const stub = runBlendYieldStub({
+      description: originalTask,
+      agentName: subtask.specialistName!,
+      config: specialist.config ?? null,
+    });
+    console.log(`[${subtask.specialistName}] Blend yield stub executed (simulated)`);
+    return { output: stub.output, model: stub.model, provider: "fallback" };
+  }
 
   const prompt = `You are ${subtask.specialistName}, a specialist AI agent.
 

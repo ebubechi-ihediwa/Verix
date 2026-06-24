@@ -4,6 +4,18 @@ import { WalletBalance } from "@/types/payment";
 import { ExecutionTraceEvent, ExecutionReceipt } from "@/types/trace";
 import { ProofRecord } from "@/types/proof";
 import { Escrow, EscrowMilestone, EscrowSignaturePhase } from "@/types/escrow";
+import {
+  ApiKeyView,
+  CreateKeyResponse,
+  CreateProjectRequest,
+  CreateProjectResponse,
+  ProjectSummary,
+  SetProviderRequest,
+  SetProviderResponse,
+  TestProviderRequest,
+  TestProviderResponse,
+  UpdateProjectRequest,
+} from "@/types/project";
 
 const API_URL = process.env.NEXT_PUBLIC_APP_URL || "";
 
@@ -140,6 +152,88 @@ export async function updateSpecialist(
 export async function deleteSpecialist(id: string): Promise<void> {
   return authedRequest(`/api/specialists?id=${encodeURIComponent(id)}`, {
     method: "DELETE",
+  });
+}
+
+// ── Projects (dashboard, session-authed) ───────────────────────────────────────
+
+export async function listProjects(): Promise<ProjectSummary[]> {
+  const data = await authedRequest<{ projects: ProjectSummary[] }>("/api/projects");
+  return data.projects;
+}
+
+export async function createProject(
+  data: CreateProjectRequest
+): Promise<CreateProjectResponse> {
+  return authedRequest("/api/projects", {
+    method: "POST",
+    body: JSON.stringify(data),
+  });
+}
+
+export async function getProject(id: string): Promise<ProjectSummary> {
+  const data = await authedRequest<{ project: ProjectSummary }>(
+    `/api/projects/${encodeURIComponent(id)}`
+  );
+  return data.project;
+}
+
+export async function updateProject(
+  id: string,
+  data: UpdateProjectRequest
+): Promise<ProjectSummary> {
+  const res = await authedRequest<{ project: ProjectSummary }>(
+    `/api/projects/${encodeURIComponent(id)}`,
+    { method: "PATCH", body: JSON.stringify(data) }
+  );
+  return res.project;
+}
+
+export async function deleteProject(id: string): Promise<void> {
+  await authedRequest(`/api/projects/${encodeURIComponent(id)}`, { method: "DELETE" });
+}
+
+export async function listProjectApiKeys(projectId: string): Promise<ApiKeyView[]> {
+  const data = await authedRequest<{ keys: ApiKeyView[] }>(
+    `/api/projects/${encodeURIComponent(projectId)}/keys`
+  );
+  return data.keys;
+}
+
+export async function createProjectApiKey(
+  projectId: string,
+  label?: string
+): Promise<CreateKeyResponse> {
+  return authedRequest(`/api/projects/${encodeURIComponent(projectId)}/keys`, {
+    method: "POST",
+    body: JSON.stringify({ label }),
+  });
+}
+
+export async function revokeProjectApiKey(projectId: string, keyId: string): Promise<void> {
+  await authedRequest(
+    `/api/projects/${encodeURIComponent(projectId)}/keys/${encodeURIComponent(keyId)}`,
+    { method: "DELETE" }
+  );
+}
+
+export async function setProjectProvider(
+  projectId: string,
+  data: SetProviderRequest
+): Promise<SetProviderResponse> {
+  return authedRequest(`/api/projects/${encodeURIComponent(projectId)}/provider`, {
+    method: "POST",
+    body: JSON.stringify(data),
+  });
+}
+
+export async function testProjectProvider(
+  projectId: string,
+  data: TestProviderRequest = {}
+): Promise<TestProviderResponse> {
+  return authedRequest(`/api/projects/${encodeURIComponent(projectId)}/provider/test`, {
+    method: "POST",
+    body: JSON.stringify(data),
   });
 }
 

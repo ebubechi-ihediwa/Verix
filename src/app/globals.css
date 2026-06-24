@@ -502,3 +502,312 @@ aside .chat-scrollbar::-webkit-scrollbar-thumb:hover {
 .focus-within\:shadow-sm:focus-within {
   box-shadow: none;
 }
+
+/* ════════════════════════════════════════════════════════════════════════════
+   DEVELOPER CONSOLE — dark cinematic system (DESIGN.md tokens)
+   Scoped under .vc-root so it never affects the light app shell or landing page.
+   IBM Plex Mono body · Space Grotesk headings · electric indigo · hairline borders
+   ════════════════════════════════════════════════════════════════════════════ */
+.vc-root {
+  --vc-bg: #07070d;
+  --vc-bg-2: #0a0a12;
+  --vc-surface: #0f0f1b;
+  --vc-surface-2: rgba(20, 20, 34, 0.4);
+  --vc-line: rgba(255, 255, 255, 0.09);
+  --vc-line-2: rgba(255, 255, 255, 0.05);
+  --vc-text: #ececf4;
+  --vc-muted: #8e8ea6;
+  --vc-faint: #5b5b72;
+  --vc-accent: #4b3bff;
+  --vc-accent-2: #7c6bff;
+  --vc-accent-ink: #e9e6ff;
+  --vc-m-violet: #9b8cff;
+  --vc-m-pink: #ffb3d1;
+  --vc-m-teal: #8fe3d0;
+  --vc-m-blue: #7aa9ff;
+  --vc-ease: cubic-bezier(0.22, 1, 0.36, 1);
+
+  position: relative;
+  min-height: 100svh;
+  background: var(--vc-bg);
+  color: var(--vc-text);
+  font-family: var(--font-ibm-plex-mono), ui-monospace, SFMono-Regular, Menlo, monospace;
+  letter-spacing: 0;
+}
+
+.vc-root ::selection {
+  background: var(--vc-accent);
+  color: var(--vc-accent-ink);
+}
+
+.vc-root h1,
+.vc-root h2,
+.vc-root h3,
+.vc-heading {
+  font-family: var(--font-space-grotesk), system-ui, sans-serif;
+  letter-spacing: -0.02em;
+  line-height: 1.0;
+}
+
+/* Sparse iridescent mesh — atmosphere, not decoration. Fixed behind content. */
+.vc-mesh {
+  position: fixed;
+  inset: 0;
+  z-index: 0;
+  pointer-events: none;
+  background:
+    radial-gradient(ellipse 60% 45% at 82% -8%, rgba(124, 107, 255, 0.12), transparent 60%),
+    radial-gradient(ellipse 48% 38% at 8% 6%, rgba(75, 59, 255, 0.09), transparent 55%),
+    radial-gradient(ellipse 55% 42% at 50% 112%, rgba(143, 227, 208, 0.05), transparent 55%);
+}
+
+/* faint hairline grid, masked to a soft radial fade */
+.vc-grid {
+  position: fixed;
+  inset: 0;
+  z-index: 0;
+  pointer-events: none;
+  background-image:
+    linear-gradient(var(--vc-line-2) 1px, transparent 1px),
+    linear-gradient(90deg, var(--vc-line-2) 1px, transparent 1px);
+  background-size: 56px 56px;
+  -webkit-mask-image: radial-gradient(ellipse 70% 60% at 50% 30%, #000 0%, transparent 80%);
+  mask-image: radial-gradient(ellipse 70% 60% at 50% 30%, #000 0%, transparent 80%);
+}
+
+/* ── Surfaces ─────────────────────────────────────────────────── */
+.vc-panel {
+  background: var(--vc-surface);
+  border: 1px solid var(--vc-line);
+  border-radius: 10px;
+}
+.vc-panel-2 {
+  background: var(--vc-surface-2);
+  border: 1px solid var(--vc-line-2);
+  border-radius: 10px;
+}
+.vc-hairline {
+  border-color: var(--vc-line);
+}
+
+/* ── Typographic helpers ──────────────────────────────────────── */
+.vc-mono {
+  font-family: var(--font-ibm-plex-mono), ui-monospace, monospace;
+  font-variant-numeric: tabular-nums;
+}
+.vc-kicker {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: 0.24em;
+  text-transform: uppercase;
+  color: var(--vc-faint);
+}
+.vc-kicker::before {
+  content: "";
+  width: 22px;
+  height: 1px;
+  background: var(--vc-accent-2);
+}
+.vc-label {
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--vc-faint);
+}
+.vc-gradient-text {
+  background: linear-gradient(100deg, var(--vc-m-violet), var(--vc-m-pink) 45%, var(--vc-m-teal));
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+}
+
+/* ── Inputs ───────────────────────────────────────────────────── */
+.vc-input,
+.vc-textarea,
+.vc-select {
+  width: 100%;
+  background: #08080f;
+  border: 1px solid var(--vc-line);
+  border-radius: 8px;
+  padding: 11px 13px;
+  color: var(--vc-text);
+  font-family: var(--font-ibm-plex-mono), ui-monospace, monospace;
+  font-size: 13.5px;
+  transition: border-color 160ms var(--vc-ease), box-shadow 160ms var(--vc-ease);
+}
+.vc-input::placeholder,
+.vc-textarea::placeholder {
+  color: var(--vc-faint);
+}
+.vc-input:focus,
+.vc-textarea:focus,
+.vc-select:focus {
+  outline: none;
+  border-color: var(--vc-accent-2);
+  box-shadow: 0 0 0 1px rgba(124, 107, 255, 0.35), 0 0 24px rgba(75, 59, 255, 0.12);
+}
+.vc-select option {
+  background: #08080f;
+  color: var(--vc-text);
+}
+
+/* ── Buttons ──────────────────────────────────────────────────── */
+.vc-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  border-radius: 8px;
+  padding: 10px 18px;
+  font-family: var(--font-ibm-plex-mono), monospace;
+  font-size: 13px;
+  font-weight: 500;
+  border: 1px solid var(--vc-line);
+  background: transparent;
+  color: var(--vc-text);
+  transition: border-color 160ms var(--vc-ease), background 160ms var(--vc-ease),
+    transform 120ms var(--vc-ease), color 160ms var(--vc-ease);
+}
+.vc-btn:hover {
+  border-color: rgba(255, 255, 255, 0.22);
+  background: rgba(255, 255, 255, 0.03);
+}
+.vc-btn:active {
+  transform: scale(0.985);
+}
+.vc-btn:disabled {
+  opacity: 0.5;
+}
+.vc-btn-primary {
+  background: var(--vc-accent);
+  border-color: rgba(124, 107, 255, 0.6);
+  color: var(--vc-accent-ink);
+  box-shadow: 0 0 28px rgba(75, 59, 255, 0.3);
+}
+.vc-btn-primary:hover {
+  background: #5a4aff;
+  border-color: rgba(124, 107, 255, 0.85);
+  box-shadow: 0 0 40px rgba(75, 59, 255, 0.45);
+}
+.vc-btn-danger {
+  border-color: rgba(220, 80, 80, 0.4);
+  color: #ff9a9a;
+}
+.vc-btn-danger:hover {
+  background: rgba(220, 80, 80, 0.08);
+  border-color: rgba(220, 80, 80, 0.7);
+}
+
+/* ── Chips / badges / status dots ─────────────────────────────── */
+.vc-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  border: 1px solid var(--vc-line);
+  border-radius: 999px;
+  padding: 3px 10px;
+  font-size: 11px;
+  letter-spacing: 0.04em;
+  color: var(--vc-muted);
+}
+.vc-chip-accent {
+  border-color: rgba(124, 107, 255, 0.4);
+  color: var(--vc-accent-2);
+  background: rgba(75, 59, 255, 0.08);
+}
+.vc-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 999px;
+  background: currentColor;
+}
+
+/* ── Sidebar / tab navigation ─────────────────────────────────── */
+.vc-navitem {
+  display: flex;
+  align-items: center;
+  gap: 11px;
+  padding: 9px 12px;
+  border-radius: 8px;
+  font-size: 13px;
+  color: var(--vc-muted);
+  border: 1px solid transparent;
+  transition: color 140ms var(--vc-ease), background 140ms var(--vc-ease), border-color 140ms var(--vc-ease);
+}
+.vc-navitem:hover {
+  color: var(--vc-text);
+  background: rgba(255, 255, 255, 0.03);
+}
+.vc-navitem-active {
+  color: var(--vc-accent-ink);
+  background: rgba(75, 59, 255, 0.1);
+  border-color: rgba(124, 107, 255, 0.28);
+}
+.vc-tab {
+  position: relative;
+  padding: 14px 2px;
+  font-size: 13px;
+  color: var(--vc-muted);
+  transition: color 140ms var(--vc-ease);
+}
+.vc-tab:hover {
+  color: var(--vc-text);
+}
+.vc-tab-active {
+  color: var(--vc-text);
+}
+.vc-tab-active::after {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: -1px;
+  height: 1px;
+  background: var(--vc-accent-2);
+  box-shadow: 0 0 12px rgba(124, 107, 255, 0.6);
+}
+
+/* ── Step indicator (wizard) ──────────────────────────────────── */
+.vc-step {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  font-size: 12px;
+  color: var(--vc-faint);
+}
+.vc-step-num {
+  width: 22px;
+  height: 22px;
+  display: grid;
+  place-items: center;
+  border-radius: 999px;
+  border: 1px solid var(--vc-line);
+  font-size: 11px;
+}
+.vc-step-active {
+  color: var(--vc-text);
+}
+.vc-step-active .vc-step-num {
+  border-color: var(--vc-accent-2);
+  color: var(--vc-accent-ink);
+  background: rgba(75, 59, 255, 0.14);
+}
+.vc-step-done .vc-step-num {
+  border-color: rgba(143, 227, 208, 0.5);
+  color: var(--vc-m-teal);
+}
+
+.vc-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 100;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+  background: rgba(3, 3, 8, 0.72);
+  backdrop-filter: blur(6px);
+}

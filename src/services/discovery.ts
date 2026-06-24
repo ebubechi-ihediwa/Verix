@@ -27,6 +27,31 @@ function toAiModelProvider(raw: string | null | undefined): AiModelProvider {
   return "openai";
 }
 
+/**
+ * Read the SDK agent config envelope `{ name, settings }` stored on
+ * `Specialist.config`. Returns the developer-facing name and settings, if any.
+ */
+function readConfigEnvelope(config: unknown): {
+  name?: string;
+  settings: Record<string, unknown> | null;
+} {
+  const raw = (config ?? {}) as { name?: unknown; settings?: unknown };
+  const settings =
+    raw.settings && typeof raw.settings === "object" && !Array.isArray(raw.settings)
+      ? (raw.settings as Record<string, unknown>)
+      : null;
+  return { name: typeof raw.name === "string" ? raw.name : undefined, settings };
+}
+
+/**
+ * The public, developer-facing name for a specialist. For SDK agents this is
+ * `config.name`; the internal `Specialist.name` (a `vx_agent_<hex>` sentinel)
+ * is never exposed. Seeded/global agents (no config) keep their real name.
+ */
+export function resolvePublicName(internalName: string, config: unknown): string {
+  return readConfigEnvelope(config).name ?? internalName;
+}
+
 function toSpecialist(row: {
   id: string;
   name: string;
@@ -44,10 +69,16 @@ function toSpecialist(row: {
   ownerId?: string | null;
   proofPolicy?: string | null;
   currentVersion?: number | null;
+  agentType?: string | null;
+  config?: unknown;
 }): Specialist {
+  const envelope = readConfigEnvelope(row.config);
   return {
     id: row.id,
-    name: row.name,
+    // Public name: config.name for SDK agents, real name otherwise. The sentinel
+    // is kept on `internalName` for any DB-key needs but is never surfaced.
+    name: envelope.name ?? row.name,
+    internalName: row.name,
     description: row.description,
     endpoint: row.endpoint,
     walletAddress: row.walletAddress,
@@ -62,6 +93,8 @@ function toSpecialist(row: {
     ownerId: row.ownerId ?? undefined,
     proofPolicy: toProofPolicy(row.proofPolicy),
     currentVersion: row.currentVersion ?? 1,
+    agentType: row.agentType ?? null,
+    config: envelope.settings,
   };
 }
 
@@ -248,7 +281,13 @@ export async function getSpecialistByName(name: string): Promise<Specialist | un
   }
   await ensureSeeded();
   const rows = await prisma.specialist.findMany({ where: { status: { not: "offline" } } });
-  const row = rows.find((r) => normalize(r.name) === target);
+  // Match on the public name (config.name for SDK agents) or the internal DB
+  // name, so pinned SDK agents resolve by the same public name shown everywhere.
+  const row = rows.find(
+    (r) =>
+      normalize(r.name) === target ||
+      normalize(resolvePublicName(r.name, (r as { config?: unknown }).config)) === target
+  );
   return row ? toSpecialist(row) : undefined;
 }
 

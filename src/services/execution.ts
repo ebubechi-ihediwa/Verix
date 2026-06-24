@@ -128,6 +128,8 @@ export async function createExecution(
     approvalStatus: "pending",
     events: [],
     ownerId,
+    projectId: request.projectId,
+    agentId: request.agentId,
     createdAt: new Date().toISOString(),
   };
 

@@ -19,7 +19,9 @@
       }
     ],
     "paths": {
-      "@/*": ["./src/*"]
+      "@/*": ["./src/*"],
+      "@verix/sdk": ["./packages/sdk/src/index.ts"],
+      "@verix/sdk/*": ["./packages/sdk/src/*"]
     }
   },
   "include": [

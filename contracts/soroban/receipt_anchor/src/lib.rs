@@ -66,4 +66,9 @@ impl ReceiptAnchor {
     pub fn get_receipt(env: Env, receipt_hash: BytesN<32>) -> Option<ReceiptRecord> {
         env.storage().persistent().get(&DataKey::Receipt(receipt_hash))
     }
+
+    /// Returns true if a receipt with this hash has been anchored.
+    pub fn is_anchored(env: Env, receipt_hash: BytesN<32>) -> bool {
+        env.storage().persistent().has(&DataKey::Receipt(receipt_hash))
+    }
 }

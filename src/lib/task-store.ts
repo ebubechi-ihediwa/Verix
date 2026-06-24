@@ -40,6 +40,8 @@ class TaskStore {
       approvedByWallet: (t as unknown as { approvedByWallet?: string | null }).approvedByWallet ?? undefined,
       approvalResultHash: (t as unknown as { approvalResultHash?: string | null }).approvalResultHash ?? undefined,
       ownerId: (t as unknown as { ownerId?: string | null }).ownerId ?? undefined,
+      projectId: (t as unknown as { projectId?: string | null }).projectId ?? undefined,
+      agentId: (t as unknown as { agentId?: string | null }).agentId ?? undefined,
       subtasks:
         t.subtasks?.map((s) => ({
           id: s.id,
@@ -107,6 +109,8 @@ class TaskStore {
           approvedByWallet: task.approvedByWallet,
           approvalResultHash: task.approvalResultHash,
           ownerId: task.ownerId,
+          projectId: task.projectId,
+          agentId: task.agentId,
           createdAt: new Date(task.createdAt),
           completedAt: task.completedAt ? new Date(task.completedAt) : null,
         },
@@ -127,6 +131,8 @@ class TaskStore {
           approvedByWallet: task.approvedByWallet,
           approvalResultHash: task.approvalResultHash,
           ownerId: task.ownerId,
+          projectId: task.projectId,
+          agentId: task.agentId,
           completedAt: task.completedAt ? new Date(task.completedAt) : null,
         },
       });
@@ -187,6 +193,8 @@ class TaskStore {
             approvedByWallet: updated.approvedByWallet,
             approvalResultHash: updated.approvalResultHash,
             ownerId: updated.ownerId,
+            projectId: updated.projectId,
+            agentId: updated.agentId,
             completedAt: updated.completedAt ? new Date(updated.completedAt) : null,
           },
         });

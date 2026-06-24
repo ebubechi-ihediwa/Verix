@@ -2,7 +2,7 @@ import { Payment } from "@/types/payment";
 import { prisma } from "@/lib/db";
 import { getCoordinatorAddress } from "@/lib/wallet";
 import { isStellarPublicKey, stellarTxExplorerUrl } from "@/lib/stellar-config";
-import { getSpecialistByName } from "@/services/discovery";
+import { getSpecialistById, getSpecialistByName } from "@/services/discovery";
 
 async function persistPayment(payment: Payment, dbSpecialistId?: string): Promise<void> {
   if (!dbSpecialistId) return;
@@ -54,9 +54,17 @@ async function persistPayment(payment: Payment, dbSpecialistId?: string): Promis
 export async function createPayment(
   taskId: string,
   specialistName: string,
-  amount: number
+  amount: number,
+  specialistId?: string
 ): Promise<Payment> {
-  const specialist = await getSpecialistByName(specialistName);
+  // Resolve the recipient by ID first when available (pinned/project agents).
+  // Public display names (config.name) are NOT globally unique, so resolving a
+  // project agent's wallet by name could pick another project's agent. The ID
+  // path eliminates that. Legacy/unpinned subtasks carry no specialistId and
+  // fall back to name lookup (seeded specialists have globally-unique names).
+  const specialist =
+    (specialistId ? await getSpecialistById(specialistId) : undefined) ??
+    (await getSpecialistByName(specialistName));
   const coordinator = safeCoordinatorAddress();
   const recipient = specialist?.walletAddress;
 

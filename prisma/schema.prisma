@@ -24,6 +24,11 @@ model Task {
   approvedByWallet   String?
   approvalResultHash String?
   ownerId     String?
+  // ── v3 tenancy (additive) — null = legacy/unscoped task ─────────────────────
+  projectId   String?
+  // agentId: the project Specialist chosen via the SDK gateway (/api/v1/executions).
+  // Linkage only — the coordinator routes normally; null = legacy/console task.
+  agentId     String?
   createdAt   DateTime @default(now())
   completedAt DateTime?
 
@@ -34,6 +39,10 @@ model Task {
   receipt      ExecutionReceipt?
   escrow       Escrow?
   proofs       Proof[]
+  project      Project? @relation(fields: [projectId], references: [id], onDelete: SetNull)
+
+  @@index([projectId])
+  @@index([agentId])
 }
 
 model Subtask {
@@ -75,11 +84,23 @@ model Specialist {
   /// ProofPolicy: "trace-only" | "receipt-proof" | "escrow-eligible"
   proofPolicy    String   @default("trace-only")
   currentVersion Int      @default(1)
+  // ── v3 tenancy (additive) ──────────────────────────────────────────────────
+  // projectId: null = system/global agent (legacy + demo). Set when deployed via SDK.
+  projectId      String?
+  /// AgentType: "blend_yield" | "soroswap_trading" | "aquarius_liquidity" | "anchor_payment" | null = LLM specialist
+  agentType      String?
+  // config: SDK agent envelope { name, settings } for project-scoped agents created
+  // via /api/v1/agents. The `name` column stays a globally-unique internal sentinel
+  // (discovery upserts by name); the developer-facing name lives in config.name.
+  config         Json?
   createdAt      DateTime @default(now())
 
   subtasks Subtask[]
   payments Payment[]
   versions AgentVersion[]
+  project  Project? @relation(fields: [projectId], references: [id], onDelete: SetNull)
+
+  @@index([projectId])
 }
 
 model Payment {
@@ -220,6 +241,8 @@ model ExecutionReceipt {
   anchorContractId   String?
   anchorTxHash       String?
   anchoredAt         DateTime?
+  /// AnchorStatus: "pending" | "anchored" | "failed" — Soroban receipt anchoring (additive)
+  anchorStatus       String?
   paymentSummary     Json
   receiptHash        String
   /// ReceiptStatus: "pending" | "proof_ready" | "verified"
@@ -362,4 +385,101 @@ model Proof {
   @@index([taskId])
   @@index([receiptId])
   @@index([status])
+}
+
+// ── v3 Identity & Tenancy (Phase 1, additive) ────────────────────────────────
+
+/**
+ * Developer account. Owns one or more Projects.
+ *
+ * passwordHash format: "scrypt:<saltHex>:<hashHex>" (see lib/password.ts).
+ * Raw passwords are never stored or logged.
+ */
+model User {
+  id           String    @id @default(cuid())
+  email        String    @unique
+  passwordHash String
+  displayName  String?
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+
+  projects     Project[]
+  sessions     Session[]
+}
+
+/**
+ * Server-side session. The raw token lives only in the httpOnly cookie
+ * (asn_session); the DB stores sha256(rawToken) as tokenHash for lookup.
+ * Sessions are revocable (delete row) and expire at expiresAt.
+ */
+model Session {
+  id        String   @id @default(cuid())
+  userId    String
+  tokenHash String   @unique
+  userAgent String?
+  createdAt DateTime @default(now())
+  expiresAt DateTime
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([expiresAt])
+}
+
+/**
+ * A developer's project — one product/application. Owns its API keys, AI
+ * provider BYOK config, agents, and tasks. All execution data is project-scoped.
+ *
+ * aiApiKeyEncrypted is AES-256-GCM ciphertext (iv:authTag:ciphertext) of the
+ * developer's provider key. Only aiApiKeyMasked is ever returned to clients.
+ */
+model Project {
+  id                String   @id @default(cuid())
+  userId            String
+  name              String
+  description       String?
+  /// Network: "testnet" | "mainnet" — drives API key prefix (vx_test_ / vx_live_)
+  network           String   @default("testnet")
+  /// AIProvider: "openai" | "anthropic" | "groq" | "kimi"
+  aiProvider        String   @default("anthropic")
+  aiApiKeyEncrypted String?
+  aiApiKeyMasked    String?
+  webhookUrl        String?
+  webhookSecret     String?
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  user    User            @relation(fields: [userId], references: [id], onDelete: Cascade)
+  apiKeys ProjectApiKey[]
+  agents  Specialist[]
+  tasks   Task[]
+
+  @@index([userId])
+}
+
+/**
+ * Verix project API key (vx_live_... / vx_test_...).
+ *
+ * Only sha256(rawKey) is stored (keyHash). The raw key is shown exactly once at
+ * creation. keyPrefix + last4 are non-secret display fields. Revoked keys keep
+ * their row (revokedAt set) for audit and never resolve at lookup.
+ *
+ * NOTE: generation/lookup helpers land in Sprint 2 — this model is additive now.
+ */
+model ProjectApiKey {
+  id          String    @id @default(cuid())
+  projectId   String
+  keyHash     String    @unique
+  keyPrefix   String
+  last4       String
+  /// "live" | "test" — derived from project.network at creation.
+  environment String
+  label       String?
+  lastUsedAt  DateTime?
+  revokedAt   DateTime?
+  createdAt   DateTime  @default(now())
+
+  project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  @@index([projectId])
 }

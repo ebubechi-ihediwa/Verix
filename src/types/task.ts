@@ -30,6 +30,10 @@ export interface Task {
   approvedByWallet?: string;
   approvalResultHash?: string;
   ownerId?: string;
+  /** v3 tenancy: owning project (SDK gateway). null = legacy/console task. */
+  projectId?: string;
+  /** SDK gateway: the project Specialist chosen via /api/v1/executions. */
+  agentId?: string;
   createdAt: string;
   completedAt?: string;
 }
@@ -96,10 +100,14 @@ export interface TaskAttachment {
 export interface CreateTaskRequest {
   description: string;
   spendCap?: number;
-  walletAddress: string;
+  /** Optional for SDK gateway executions; required+validated by /api/tasks. */
+  walletAddress?: string;
   walletProvider?: string;
   requestedSpecialistId?: string;
   attachments?: TaskAttachment[];
+  /** SDK gateway only: owning project + chosen agent (linkage). */
+  projectId?: string;
+  agentId?: string;
 }
 
 export interface CreateTaskResponse {
