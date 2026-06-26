@@ -44,6 +44,15 @@ describe("GET /api/v1/receipts/:hash", () => {
       anchorTxHash: "TX123",
       anchorContractId: "CCONTRACT",
       anchoredAt: new Date("2026-06-15T00:01:00Z"),
+      blendOperation: {
+        protocol: "blend",
+        operation: "supply",
+        asset: "USDC",
+        amount: 250,
+        poolId: "CUSDCPOOL",
+        txHash: "TXSUPPLY123",
+        apy: 0.0524,
+      },
     });
     mockPrisma.proof.findUnique.mockResolvedValue({
       id: "proof_1",
@@ -64,6 +73,15 @@ describe("GET /api/v1/receipts/:hash", () => {
     expect(json.anchor.txHash).toBe("TX123");
     expect(json.anchor.contractId).toBe("CCONTRACT");
     expect(json.anchor.explorerUrl).toBe("https://explorer/tx/TX123");
+
+    // Additive Blend operation metadata surfaced on the receipt
+    expect(json.operation).toMatchObject({
+      protocol: "blend",
+      operation: "supply",
+      asset: "USDC",
+      amount: 250,
+      txHash: "TXSUPPLY123",
+    });
   });
 
   it("returns 401 without a key", async () => {

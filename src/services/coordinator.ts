@@ -7,9 +7,21 @@ import {
   appendExecutionEvent,
   completeExecution,
   failExecution,
+  getExecution,
   transitionExecution,
   updateExecution,
 } from "@/services/execution";
+import {
+  claimResume,
+  createSignatureRequest,
+  getSignatureRequestForProject,
+  isExpired,
+  markExpired,
+  markResolved,
+  parseContext,
+  releaseClaim,
+} from "@/services/signature-request";
+import { resumeBlendOperation } from "@/services/agents/blend";
 import { createPayment } from "@/services/payment";
 import { Payment } from "@/types/payment";
 import {
@@ -23,7 +35,14 @@ import { appendReputationEvent } from "@/services/reputation";
 import { recordTraceEvent } from "@/services/trace";
 import { generateReceipt } from "@/services/receipt";
 import { buildPinnedSubtask } from "@/services/routing";
-import { runBlendYieldStub } from "@/services/agents/blend-yield";
+import {
+  runBlendDiscovery,
+  executeBlendSupply,
+  executeBlendWithdraw,
+  parseBlendSettings,
+  resolveBlendNetwork,
+  type BlendOperationData,
+} from "@/services/agents/blend";
 import { prepareEscrowForExecution } from "@/services/escrow";
 import { sha256 } from "@/lib/hash";
 import { decrypt } from "@/lib/encryption";
@@ -65,18 +84,41 @@ interface SpendCapResult {
   effectiveCap: number;
 }
 
+/** Context captured when a wallet-mode op pauses awaiting the user's signature. */
+interface AwaitingSignatureContext {
+  unsignedXdr: string;
+  protocol: "blend";
+  operation: "supply" | "withdraw";
+  asset: string;
+  amount: number;
+  poolId: string;
+  apy: number;
+  sourceWallet: string;
+  network: "testnet" | "mainnet";
+  agentName: string;
+  subtaskId: string;
+}
+
 interface ExecuteResult {
   deliverables: Array<{ title: string; content: string; specialistName: string }>;
   payments: Payment[];
   totalSpent: number;
   subtasks: Subtask[];
   envelopes: AgentExecutionEnvelope[];
+  /** Structured DeFi operations (e.g. Blend supply) produced during execution. */
+  operations: BlendOperationData[];
+  /** Set when execution paused awaiting a wallet signature. */
+  awaiting?: AwaitingSignatureContext;
 }
 
 interface SpecialistResult {
   output: string;
   model: string;
   provider: "claude" | "openai" | "groq" | "fallback";
+  /** Set when a typed agent performed an on-chain operation (e.g. Blend supply). */
+  operation?: BlendOperationData;
+  /** Set when a wallet-mode op built an unsigned XDR and is awaiting signature. */
+  awaitingSignature?: AwaitingSignatureContext;
 }
 
 interface DelegationRequest {
@@ -348,6 +390,8 @@ async function stageExecute(
   const deliverables: Array<{ title: string; content: string; specialistName: string }> = [];
   const payments: Payment[] = [];
   const envelopes: AgentExecutionEnvelope[] = [];
+  const operations: BlendOperationData[] = [];
+  let awaiting: AwaitingSignatureContext | undefined;
   let totalSpent = 0;
 
   // ── Phase A: Serial payment — no concurrent spend-cap races ─────────────────
@@ -439,8 +483,10 @@ async function stageExecute(
         ).catch((e) => console.warn("[Trace] specialist_invoked failed:", e));
 
         try {
-          const specialistResult = await executeSpecialist(subtask, description);
+          const specialistResult = await executeSpecialist(taskId, subtask, description, effectiveCap);
           const { output: result, model, provider } = specialistResult;
+          if (specialistResult.operation) operations.push(specialistResult.operation);
+          if (specialistResult.awaitingSignature && !awaiting) awaiting = specialistResult.awaitingSignature;
 
           await pushEvent(taskId, "specialist", `${subtask.specialistName} delivered results.`, "info");
 
@@ -520,9 +566,12 @@ async function stageExecute(
                 payments.push(childPayment);
                 totalSpent += child.cost || 0;
                 const childResult = await executeSpecialist(
+                  taskId,
                   child,
-                  `${description}\n\nDelegated scope from ${subtask.specialistName}: ${delegation.prompt}`
+                  `${description}\n\nDelegated scope from ${subtask.specialistName}: ${delegation.prompt}`,
+                  effectiveCap
                 );
+                if (childResult.operation) operations.push(childResult.operation);
                 const childOutputHash = sha256(childResult.output);
                 const childPromptHash = sha256(`${child.specialistName}:${delegation.prompt}`);
                 envelopes.push({
@@ -616,7 +665,7 @@ async function stageExecute(
     );
   }
 
-  return { deliverables, payments, totalSpent, subtasks, envelopes };
+  return { deliverables, payments, totalSpent, subtasks, envelopes, operations, awaiting };
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -631,7 +680,7 @@ async function stageSynthesize(
   initialSubtasks: Subtask[],
   registrySnapshotHash?: string
 ): Promise<void> {
-  const { deliverables, payments, totalSpent, subtasks } = executeResult;
+  const { deliverables, payments, totalSpent, subtasks, operations } = executeResult;
 
   const versionBySpecialist = new Map<string, { agentVersion: number; versionHash: string }>();
   for (const s of subtasks) {
@@ -709,6 +758,8 @@ async function stageSynthesize(
     resultSummary,
     registrySnapshotHash,
     paymentBreakdown,
+    // Additive display metadata — NOT part of receiptHash (committed via traceRoot).
+    blendOperation: operations[0],
   }).catch((e) => console.warn("[Receipt] generateReceipt failed:", e));
 }
 
@@ -772,9 +823,138 @@ export async function executeCoordinator(
 
   const executeResult = await stageExecute(taskId, description, subtasks, effectiveCap);
 
+  // Wallet mode: an unsigned XDR was built. Persist the resume context and PAUSE
+  // — no receipt/proof/anchor until the user signs and the execution resumes.
+  if (executeResult.awaiting) {
+    await pauseForSignature(taskId, description, effectiveCap, registrySnapshotHash, executeResult);
+    console.log(`[Coordinator] Task ${taskId} paused — awaiting wallet signature.`);
+    return;
+  }
+
   await stageSynthesize(taskId, description, executeResult, spendCap, subtasks, registrySnapshotHash);
 
   console.log(`[Coordinator] Task ${taskId} completed. Total spent: $${executeResult.totalSpent.toFixed(2)} USDC`);
+}
+
+/** Persist the wallet-signing request and transition the task to awaiting_signature. */
+async function pauseForSignature(
+  taskId: string,
+  description: string,
+  effectiveCap: number,
+  registrySnapshotHash: string | undefined,
+  executeResult: ExecuteResult
+): Promise<void> {
+  const aw = executeResult.awaiting!;
+  const task = await getExecution(taskId);
+
+  await createSignatureRequest({
+    taskId,
+    projectId: task?.projectId ?? "",
+    sourceWallet: aw.sourceWallet,
+    unsignedXdr: aw.unsignedXdr,
+    context: {
+      blend: {
+        operation: aw.operation,
+        asset: aw.asset,
+        network: aw.network,
+        poolId: aw.poolId,
+        amount: aw.amount,
+        apy: aw.apy,
+        agentName: aw.agentName,
+        subtaskId: aw.subtaskId,
+      },
+      synth: {
+        description,
+        spendCap: effectiveCap,
+        registrySnapshotHash,
+        totalSpent: executeResult.totalSpent,
+        payments: executeResult.payments as unknown[],
+        subtasks: executeResult.subtasks as unknown[],
+      },
+    },
+  });
+
+  await pushEvent(taskId, "system", `Awaiting wallet signature for ${aw.operation} of ${aw.amount} ${aw.asset}.`, "pending");
+  await transitionExecution(taskId, "awaiting_signature");
+}
+
+/**
+ * Resume a paused wallet-mode execution after the user signs the XDR.
+ *
+ * Idempotent: a duplicate resume returns the existing state without resubmitting.
+ * On a fresh resume it submits the signed tx, confirms, then runs the normal
+ * synthesize path (receipt → proof → anchor). Returns a discriminated result the
+ * route maps to HTTP status.
+ */
+export type ResumeOutcome =
+  | { kind: "not_found" }
+  | { kind: "expired" }
+  | { kind: "not_awaiting" }
+  | { kind: "already"; status: string; txHash: string | null }
+  | { kind: "resumed"; txHash: string };
+
+export async function resumeExecution(
+  projectId: string,
+  taskId: string,
+  signedXdr: string
+): Promise<ResumeOutcome> {
+  const req = await getSignatureRequestForProject(projectId, taskId);
+  if (!req) return { kind: "not_found" };
+
+  // Idempotency: already resolved / in progress → return existing state.
+  if (req.status === "resolved" || req.status === "resuming") {
+    return { kind: "already", status: req.status, txHash: req.txHash };
+  }
+  if (req.status === "expired") return { kind: "expired" };
+  if (req.status !== "awaiting_signature") return { kind: "not_awaiting" };
+  if (isExpired(req)) {
+    await markExpired(taskId);
+    return { kind: "expired" };
+  }
+
+  // Atomic claim — only one concurrent resume proceeds.
+  const claimed = await claimResume(taskId);
+  if (!claimed) {
+    const fresh = await getSignatureRequestForProject(projectId, taskId);
+    return { kind: "already", status: fresh?.status ?? "resuming", txHash: fresh?.txHash ?? null };
+  }
+
+  const ctx = parseContext(req);
+  try {
+    const result = await resumeBlendOperation({
+      taskId,
+      subtaskId: ctx.blend.subtaskId,
+      agentName: ctx.blend.agentName,
+      operation: ctx.blend.operation,
+      asset: ctx.blend.asset,
+      network: ctx.blend.network,
+      signedXdr,
+      poolId: ctx.blend.poolId,
+      amount: ctx.blend.amount,
+      apy: ctx.blend.apy,
+    });
+    const txHash = result.txHash!;
+    await markResolved(taskId, txHash);
+
+    // Continue the normal completion path: receipt → proof → anchor.
+    await transitionExecution(taskId, "processing");
+    const executeResult: ExecuteResult = {
+      deliverables: [{ title: `${ctx.blend.agentName} Report`, content: result.output, specialistName: ctx.blend.agentName }],
+      payments: (ctx.synth.payments as Payment[]) ?? [],
+      totalSpent: ctx.synth.totalSpent,
+      subtasks: (ctx.synth.subtasks as Subtask[]) ?? [],
+      envelopes: [],
+      operations: result.operation ? [result.operation] : [],
+    };
+    await stageSynthesize(taskId, ctx.synth.description, executeResult, ctx.synth.spendCap, executeResult.subtasks, ctx.synth.registrySnapshotHash);
+
+    return { kind: "resumed", txHash };
+  } catch (error) {
+    // Roll the claim back so the user can retry signing.
+    await releaseClaim(taskId);
+    await transitionExecution(taskId, "awaiting_signature").catch(() => {});
+    throw error;
+  }
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -966,21 +1146,82 @@ async function decomposeTaskFallback(description: string): Promise<Subtask[]> {
 // ─────────────────────────────────────────────────────────────────────────────
 
 async function executeSpecialist(
+  taskId: string,
   subtask: Subtask,
-  originalTask: string
+  originalTask: string,
+  spendCap: number
 ): Promise<SpecialistResult> {
   const specialist = await getSpecialistByName(subtask.specialistName!);
 
-  // Typed agent branch: deterministic Blend yield STUB (Sprint 5B). Produces a
-  // real deliverable/trace/receipt without any LLM call or on-chain action.
+  // Typed agent branch: Blend yield. The shared engine discovers + selects a real
+  // pool, then for operation="supply"/"withdraw" executes a real testnet tx; with
+  // no operation it stops after discovery and returns a labelled stub. No funds
+  // move without an explicit operation.
   if (specialist?.agentType === "blend_yield") {
-    const stub = runBlendYieldStub({
-      description: originalTask,
-      agentName: subtask.specialistName!,
+    const agentName = subtask.specialistName!;
+    const network = resolveBlendNetwork();
+    const settings = parseBlendSettings(specialist.config ?? null);
+
+    // Source wallet for wallet-mode signing (the task's connected wallet).
+    const sourceWallet = (await getExecution(taskId))?.walletAddress;
+
+    if (settings.operation === "supply") {
+      const supply = await executeBlendSupply({
+        taskId,
+        subtaskId: subtask.id,
+        agentName,
+        asset: settings.asset,
+        amount: settings.amount ?? 0,
+        minApy: settings.minApy,
+        spendCap,
+        network,
+        sourceWallet,
+      });
+      console.log(`[${agentName}] Blend supply ${supply.status} — ${supply.txHash ? `tx ${supply.txHash.slice(0, 12)}…` : "awaiting signature"}`);
+      if (supply.status === "AWAITING_SIGNATURE" && supply.awaiting) {
+        return {
+          output: supply.output, model: "blend-supply", provider: "fallback",
+          awaitingSignature: { unsignedXdr: supply.unsignedXdr!, protocol: "blend", operation: "supply", asset: settings.asset, amount: supply.awaiting.amount, poolId: supply.awaiting.poolId, apy: supply.awaiting.apy, sourceWallet: supply.awaiting.sourceWallet, network, agentName, subtaskId: subtask.id },
+        };
+      }
+      return { output: supply.output, model: "blend-supply", provider: "fallback", operation: supply.operation };
+    }
+
+    if (settings.operation === "withdraw") {
+      const withdraw = await executeBlendWithdraw({
+        taskId,
+        subtaskId: subtask.id,
+        agentName,
+        asset: settings.asset,
+        // Default to "max" when no amount is given (withdraw the full position).
+        amount: settings.amount ?? "max",
+        minApy: settings.minApy,
+        spendCap,
+        network,
+        sourceWallet,
+      });
+      console.log(`[${agentName}] Blend withdraw ${withdraw.status} — ${withdraw.txHash ? `tx ${withdraw.txHash.slice(0, 12)}…` : "awaiting signature"}`);
+      if (withdraw.status === "AWAITING_SIGNATURE" && withdraw.awaiting) {
+        return {
+          output: withdraw.output, model: "blend-withdraw", provider: "fallback",
+          awaitingSignature: { unsignedXdr: withdraw.unsignedXdr!, protocol: "blend", operation: "withdraw", asset: settings.asset, amount: withdraw.awaiting.amount, poolId: withdraw.awaiting.poolId, apy: withdraw.awaiting.apy, sourceWallet: withdraw.awaiting.sourceWallet, network, agentName, subtaskId: subtask.id },
+        };
+      }
+      return { output: withdraw.output, model: "blend-withdraw", provider: "fallback", operation: withdraw.operation };
+    }
+
+    // Discovery-only (no operation): real discovery + selection, no tx.
+    const discovery = await runBlendDiscovery({
+      taskId,
+      subtaskId: subtask.id,
+      agentName,
       config: specialist.config ?? null,
+      network,
     });
-    console.log(`[${subtask.specialistName}] Blend yield stub executed (simulated)`);
-    return { output: stub.output, model: stub.model, provider: "fallback" };
+    console.log(
+      `[${agentName}] Blend pool discovery complete — selected ${discovery.selected.poolId.slice(0, 8)}… (no tx)`
+    );
+    return { output: discovery.output, model: discovery.model, provider: "fallback" };
   }
 
   const prompt = `You are ${subtask.specialistName}, a specialist AI agent.

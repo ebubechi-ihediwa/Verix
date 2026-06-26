@@ -17,6 +17,8 @@ export type {
   ExecutionListItem,
   ExecutionListResponse,
   ExecutionDetail,
+  ExecutionSignatureState,
+  ResumeExecutionResponse,
   ReceiptVerifyResponse,
   VerificationConstraints,
   AnchorView,

@@ -34,7 +34,10 @@ const ALLOWED_TRANSITIONS: ExecutionTransition[] = [
   { from: ["decomposing"], to: "discovering" },
   { from: ["funding_pending"], to: "discovering" },
   { from: ["discovering"], to: "processing" },
-  { from: ["decomposing", "discovering", "processing"], to: "failed" },
+  { from: ["decomposing", "discovering", "processing", "awaiting_signature"], to: "failed" },
+  // Wallet-mode pause/resume (Beta Phase 1)
+  { from: ["processing"], to: "awaiting_signature" },
+  { from: ["awaiting_signature"], to: "processing" },
   { from: ["processing"], to: "completed" },
 ];
 

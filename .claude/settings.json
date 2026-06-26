@@ -1,0 +1,8 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(node -e \"console.log\\(JSON.stringify\\(require\\('./package.json'\\).scripts,null,2\\)\\)\")",
+      "Bash(node -e \"const p=require\\('./package.json'\\); console.log\\('engines:',JSON.stringify\\(p.engines||{}\\)\\); console.log\\('next:',p.dependencies.next,'prisma:',p.devDependencies?.prisma||p.dependencies?.prisma\\)\")"
+    ]
+  }
+}

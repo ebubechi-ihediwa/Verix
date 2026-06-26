@@ -18,6 +18,7 @@ vi.mock("@/lib/db", () => ({
     specialist: { findFirst: vi.fn() },
     task: { findMany: vi.fn(), findFirst: vi.fn() },
     executionTraceEvent: { count: vi.fn() },
+    executionSignatureRequest: { findUnique: vi.fn().mockResolvedValue(null) },
   },
 }));
 

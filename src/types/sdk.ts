@@ -99,6 +99,34 @@ export interface ExecutionDetail extends ExecutionListItem {
     status: string;
     createdAt: string;
   } | null;
+  /** Protocol operation + execution timeline (e.g. Blend supply/withdraw), or null. */
+  operation?: Record<string, unknown> | null;
+  /** Wallet-mode signature/resume state, or null when not a wallet-mode pause. */
+  signature?: ExecutionSignatureState | null;
+}
+
+/** Durable wallet-signing state surfaced on the execution detail. */
+export interface ExecutionSignatureState {
+  status: string; // awaiting_signature | resuming | resolved | expired | failed
+  sourceWallet: string;
+  /** The unsigned XDR to sign — present only while awaiting + not expired. */
+  unsignedXdr: string | null;
+  createdAt: string;
+  expiresAt: string;
+  expired: boolean;
+  resumeAvailable: boolean;
+  resumedAt: string | null;
+  txHash: string | null;
+}
+
+/** Response of POST /api/v1/executions/:id/resume. */
+export interface ResumeExecutionResponse {
+  execution: {
+    id: string;
+    status: "resumed" | "already_resumed";
+    txHash?: string | null;
+    signatureStatus?: string;
+  };
 }
 
 // ── Receipts / verification ─────────────────────────────────────────────────
@@ -116,6 +144,9 @@ export interface ConsoleExecutionRow {
   /** Soroban anchor: "anchored" | "pending" | "failed" | null (no receipt yet). */
   anchorStatus: string | null;
   anchorTxHash: string | null;
+  /** Wallet-signing state when paused: "awaiting_signature" | "resolved" | … | null. */
+  signatureStatus: string | null;
+  signatureExpiresAt: string | null;
   createdAt: string;
 }
 

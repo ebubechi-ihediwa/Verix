@@ -243,6 +243,9 @@ model ExecutionReceipt {
   anchoredAt         DateTime?
   /// AnchorStatus: "pending" | "anchored" | "failed" — Soroban receipt anchoring (additive)
   anchorStatus       String?
+  /// Blend operation display metadata { protocol, operation, asset, amount, poolId, txHash, apy }.
+  /// Additive + NOT part of receiptHash (commitment rides on traceRoot). Sprint 7B.
+  blendOperation     Json?
   paymentSummary     Json
   receiptHash        String
   /// ReceiptStatus: "pending" | "proof_ready" | "verified"
@@ -482,4 +485,34 @@ model ProjectApiKey {
   project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
 
   @@index([projectId])
+}
+
+/**
+ * Durable wallet-signing request (Beta Phase 1).
+ *
+ * When a project agent runs in wallet signing mode, the engine builds an unsigned
+ * XDR and the execution PAUSES (Task.status = "awaiting_signature"). This row
+ * persists everything needed to resume after the user signs: the unsigned XDR,
+ * signing mode, source wallet, expiry, and a `context` blob (protocol op +
+ * receipt-synthesis snapshot). Additive — never part of any receipt/proof hash.
+ *
+ * status: "awaiting_signature" | "resuming" | "resolved" | "expired" | "failed"
+ */
+model ExecutionSignatureRequest {
+  id           String    @id @default(cuid())
+  taskId       String    @unique
+  projectId    String
+  signingMode  String     @default("wallet")
+  sourceWallet String
+  unsignedXdr  String
+  status       String     @default("awaiting_signature")
+  txHash       String?
+  /// Resume context: { blend: {...op}, synth: {...receipt inputs} }
+  context      Json
+  resumedAt    DateTime?
+  createdAt    DateTime   @default(now())
+  expiresAt    DateTime
+
+  @@index([projectId])
+  @@index([status])
 }

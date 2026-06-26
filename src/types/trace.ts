@@ -37,6 +37,8 @@ export type TraceEventType =
   | "proof_verification_failed"
   // Blend Protocol events
   | "blend_rate_check"
+  | "blend_pool_selected"
+  | "blend_tx_submitted"
   | "blend_supply_initiated"
   | "blend_supply_confirmed"
   | "blend_withdraw_initiated"

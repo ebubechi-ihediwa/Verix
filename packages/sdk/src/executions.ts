@@ -4,6 +4,7 @@ import type {
   CreateExecutionResponse,
   ExecutionDetail,
   ExecutionListItem,
+  ResumeExecutionResponse,
 } from "./types";
 
 /** Execution submission + reads — wraps `/api/v1/executions`. */
@@ -34,6 +35,20 @@ export class ExecutionsResource {
     const { execution } = await this.client.request<{ execution: ExecutionDetail }>(
       "GET",
       `/executions/${encodeURIComponent(id)}`
+    );
+    return execution;
+  }
+
+  /**
+   * Resume a paused wallet-mode execution by submitting the user's signed XDR.
+   * Idempotent — a duplicate resume returns the existing state without
+   * resubmitting. Continues submit → confirm → receipt → proof → anchor.
+   */
+  async resume(id: string, signedXdr: string): Promise<ResumeExecutionResponse["execution"]> {
+    const { execution } = await this.client.request<ResumeExecutionResponse>(
+      "POST",
+      `/executions/${encodeURIComponent(id)}/resume`,
+      { signedXdr }
     );
     return execution;
   }

@@ -13,13 +13,24 @@ function shortHash(h: string | null): string {
   return h ? `${h.slice(0, 10)}…${h.slice(-6)}` : "—";
 }
 
+type Row = ConsoleExecutionRow & { sigExpired: boolean };
+
 export default function ReceiptsTab() {
   const { project } = useProject();
-  const [rows, setRows] = useState<ConsoleExecutionRow[] | null>(null);
+  const [rows, setRows] = useState<Row[] | null>(null);
 
   useEffect(() => {
     listProjectExecutions(project.id)
-      .then(setRows)
+      .then((data) => {
+        // Stamp expiry once at load time (Date.now in an async callback, not render).
+        const now = Date.now();
+        setRows(
+          data.map((r) => ({
+            ...r,
+            sigExpired: r.signatureExpiresAt ? new Date(r.signatureExpiresAt).getTime() <= now : false,
+          }))
+        );
+      })
       .catch((e) => {
         toast.error(e instanceof Error ? e.message : "Failed to load executions");
         setRows([]);
@@ -59,6 +70,7 @@ export default function ReceiptsTab() {
             <Th>Receipt hash</Th>
             <Th>Proof</Th>
             <Th>Anchor</Th>
+            <Th>Signature</Th>
             <Th>Created</Th>
           </tr>
         </thead>
@@ -71,6 +83,9 @@ export default function ReceiptsTab() {
               <Td><span className="vc-mono text-[var(--vc-muted)]">{shortHash(r.receiptHash)}</span></Td>
               <Td><StatusPill status={r.proofStatus} /></Td>
               <Td><AnchorBadge status={r.receiptHash ? r.anchorStatus : null} txHash={r.anchorTxHash} /></Td>
+              <Td>
+                <SignatureCell status={r.signatureStatus} expiresAt={r.signatureExpiresAt} expired={r.sigExpired} />
+              </Td>
               <Td><span className="text-[var(--vc-faint)]">{new Date(r.createdAt).toLocaleDateString()}</span></Td>
             </tr>
           ))}
@@ -78,6 +93,28 @@ export default function ReceiptsTab() {
       </table>
     </div>
   );
+}
+
+function SignatureCell({
+  status,
+  expiresAt,
+  expired,
+}: {
+  status: string | null;
+  expiresAt: string | null;
+  expired: boolean;
+}) {
+  if (!status) return <span className="text-[var(--vc-faint)]">—</span>;
+  if (status === "awaiting_signature" && !expired) {
+    return (
+      <span className="vc-chip vc-chip-accent" title={expiresAt ? `Expires ${new Date(expiresAt).toLocaleString()}` : undefined}>
+        Awaiting · resume available
+      </span>
+    );
+  }
+  if (status === "awaiting_signature" && expired) return <StatusPill status="expired" />;
+  if (status === "resolved") return <StatusPill status="completed" />;
+  return <StatusPill status={status} />;
 }
 
 function Th({ children }: { children: React.ReactNode }) {

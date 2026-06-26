@@ -11,7 +11,7 @@ Every execution produces a verifiable receipt anchored to Soroban. A single cryp
 ## What Verix Does
 
 ### The Core Loop
-
+ 
 1. **User defines a mandate** — "maximize my yield on Blend, stay within this spend cap, rebalance if rates shift"
 2. **AI coordinator decomposes the mandate** into subtasks and routes each to the right specialist agent
 3. **Agents act on-chain** — supplying liquidity to Blend pools, executing swaps on Soroswap, routing payments through anchors

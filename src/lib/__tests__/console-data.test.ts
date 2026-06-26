@@ -6,6 +6,7 @@ vi.mock("@/lib/db", () => ({
     proof: { findMany: vi.fn() },
     specialist: { findMany: vi.fn() },
     executionReceipt: { findMany: vi.fn() },
+    executionSignatureRequest: { findMany: vi.fn() },
   },
 }));
 vi.mock("@/services/discovery", () => ({
@@ -20,9 +21,13 @@ const mockPrisma = prisma as unknown as {
   proof: { findMany: ReturnType<typeof vi.fn> };
   specialist: { findMany: ReturnType<typeof vi.fn> };
   executionReceipt: { findMany: ReturnType<typeof vi.fn> };
+  executionSignatureRequest: { findMany: ReturnType<typeof vi.fn> };
 };
 
-beforeEach(() => vi.clearAllMocks());
+beforeEach(() => {
+  vi.clearAllMocks();
+  mockPrisma.executionSignatureRequest.findMany.mockResolvedValue([]);
+});
 
 describe("listProjectExecutions — surfaces anchor + public name", () => {
   it("includes anchorStatus/anchorTxHash and the public agent name", async () => {

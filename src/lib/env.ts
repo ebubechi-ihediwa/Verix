@@ -110,6 +110,32 @@ function buildEnv() {
     SOROBAN_AGENT_REGISTRY_CONTRACT_ID: process.env.SOROBAN_AGENT_REGISTRY_CONTRACT_ID,
     SOROBAN_RECEIPT_ANCHOR_CONTRACT_ID: process.env.SOROBAN_RECEIPT_ANCHOR_CONTRACT_ID,
 
+    // ── Blend Protocol (Sprint 7) — discovery only in 7A; no funds move ───────
+    /** Operational Blend network. Defaults to STELLAR_NETWORK. */
+    BLEND_MODE: (process.env.BLEND_MODE ??
+      process.env.STELLAR_NETWORK ??
+      "testnet") as "testnet" | "mainnet",
+    /** Network whose vetted pool allowlist is used for discovery/selection. */
+    BLEND_NETWORK: (process.env.BLEND_NETWORK ??
+      process.env.BLEND_MODE ??
+      process.env.STELLAR_NETWORK ??
+      "testnet") as "testnet" | "mainnet",
+    /** Optional Blend rates API base URL override (defaults per network). */
+    BLEND_API_URL: process.env.BLEND_API_URL,
+    /**
+     * Transaction signing mode for Blend operations (Sprint 7D):
+     *   "server" — coordinator key signs server-side (current behavior; testnet).
+     *   "wallet" — build unsigned XDR, return AWAITING_SIGNATURE, resume after the
+     *              user signs (no server custody; required for mainnet).
+     */
+    BLEND_SIGNING_MODE: (process.env.BLEND_SIGNING_MODE ?? "server") as "server" | "wallet",
+    /**
+     * Optional JSON override for the vetted pool allowlist, shape:
+     * {"testnet":[{"asset":"USDC","poolId":"C...","name":"USDC Pool"}], "mainnet":[...]}
+     * When unset, the built-in defaults in services/agents/blend/config.ts are used.
+     */
+    BLEND_POOLS: process.env.BLEND_POOLS,
+
     // ── Wallets — required in production; optional in demo/local ─────────────
 
     COORDINATOR_STELLAR_PUBLIC_KEY: isProd

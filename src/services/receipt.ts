@@ -105,6 +105,13 @@ export interface ReceiptInput {
     splitRole?: "primary" | "subcontractor";
     delegatedBySpecialistName?: string;
   }>;
+  /**
+   * Optional DeFi operation display metadata (e.g. Blend supply). Persisted
+   * additively to ExecutionReceipt.blendOperation and DELIBERATELY excluded from
+   * hashReceiptCommitment — the operation is committed via traceRoot (the
+   * blend_*_confirmed trace events). Keeps canonical receipt hashes unchanged.
+   */
+  blendOperation?: object;
 }
 
 /**
@@ -124,6 +131,7 @@ export async function generateReceipt(input: ReceiptInput): Promise<ExecutionRec
     resultSummary,
     registrySnapshotHash,
     paymentBreakdown,
+    blendOperation,
   } = input;
 
   // Hash the raw task input so receipts commit to the exact prompt
@@ -210,6 +218,8 @@ export async function generateReceipt(input: ReceiptInput): Promise<ExecutionRec
       paymentSummary: paymentSummary as unknown as object,
       receiptHash,
       status: "proof_ready",
+      // Additive display field — never enters hashReceiptCommitment.
+      ...(blendOperation ? { blendOperation: blendOperation as object } : {}),
     },
     update: {
       taskInputHash,
@@ -222,6 +232,7 @@ export async function generateReceipt(input: ReceiptInput): Promise<ExecutionRec
       paymentSummary: paymentSummary as unknown as object,
       receiptHash,
       status: "proof_ready",
+      ...(blendOperation ? { blendOperation: blendOperation as object } : {}),
     },
   });
 

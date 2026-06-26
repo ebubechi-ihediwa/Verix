@@ -53,5 +53,7 @@ export async function GET(
     },
     proof,
     anchor: toAnchorView(receipt),
+    // Additive: Blend operation display metadata (null for non-Blend receipts).
+    operation: receipt.blendOperation ?? null,
   });
 }

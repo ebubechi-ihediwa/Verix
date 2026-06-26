@@ -6,6 +6,7 @@ export type TaskStatus =
   | "decomposing"
   | "discovering"
   | "processing"
+  | "awaiting_signature"
   | "completed"
   | "failed";
 

@@ -72,6 +72,24 @@ export async function getExecutionDetail(
 
   const traceEventCount = await prisma.executionTraceEvent.count({ where: { taskId: t.id } });
 
+  // Wallet-mode signature/resume state (additive).
+  let signature: ExecutionDetail["signature"] = null;
+  const sig = await prisma.executionSignatureRequest.findUnique({ where: { taskId: t.id } });
+  if (sig) {
+    const expired = sig.expiresAt.getTime() <= Date.now();
+    signature = {
+      status: sig.status,
+      sourceWallet: sig.sourceWallet,
+      unsignedXdr: sig.status === "awaiting_signature" && !expired ? sig.unsignedXdr : null,
+      createdAt: sig.createdAt.toISOString(),
+      expiresAt: sig.expiresAt.toISOString(),
+      expired,
+      resumeAvailable: sig.status === "awaiting_signature" && !expired,
+      resumedAt: sig.resumedAt ? sig.resumedAt.toISOString() : null,
+      txHash: sig.txHash,
+    };
+  }
+
   return {
     id: t.id,
     description: t.description,
@@ -98,6 +116,9 @@ export async function getExecutionDetail(
           createdAt: t.receipt.createdAt.toISOString(),
         }
       : null,
+    // Additive: protocol operation + execution timeline (e.g. Blend supply/withdraw).
+    operation: (t.receipt?.blendOperation as Record<string, unknown> | null) ?? null,
+    signature,
   };
 }
 

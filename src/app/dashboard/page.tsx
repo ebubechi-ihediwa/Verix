@@ -132,6 +132,7 @@ const STATUS_LABELS: Record<TaskStatus, string> = {
   decomposing:     "Routing",
   discovering:     "Discovering",
   processing:      "Executing",
+  awaiting_signature: "Awaiting Signature",
   completed:       "Completed",
   failed:          "Failed",
 };

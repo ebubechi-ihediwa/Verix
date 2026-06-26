@@ -44,16 +44,27 @@ export async function listProjectExecutions(projectId: string): Promise<ConsoleE
   const proofByTask = new Map(proofs.map((p) => [p.taskId, p.status]));
   const names = await agentNameMap(tasks.map((t) => t.agentId));
 
-  return tasks.map((t) => ({
-    id: t.id,
-    status: t.status,
-    agentName: t.agentId ? names.get(t.agentId) ?? null : null,
-    receiptHash: t.receipt?.receiptHash ?? null,
-    proofStatus: proofByTask.get(t.id) ?? null,
-    anchorStatus: t.receipt ? t.receipt.anchorStatus ?? "pending" : null,
-    anchorTxHash: t.receipt?.anchorTxHash ?? null,
-    createdAt: t.createdAt.toISOString(),
-  }));
+  const sigs = await prisma.executionSignatureRequest.findMany({
+    where: { taskId: { in: taskIds } },
+    select: { taskId: true, status: true, expiresAt: true },
+  });
+  const sigByTask = new Map(sigs.map((s) => [s.taskId, s]));
+
+  return tasks.map((t) => {
+    const sig = sigByTask.get(t.id);
+    return {
+      id: t.id,
+      status: t.status,
+      agentName: t.agentId ? names.get(t.agentId) ?? null : null,
+      receiptHash: t.receipt?.receiptHash ?? null,
+      proofStatus: proofByTask.get(t.id) ?? null,
+      anchorStatus: t.receipt ? t.receipt.anchorStatus ?? "pending" : null,
+      anchorTxHash: t.receipt?.anchorTxHash ?? null,
+      signatureStatus: sig?.status ?? null,
+      signatureExpiresAt: sig?.expiresAt ? sig.expiresAt.toISOString() : null,
+      createdAt: t.createdAt.toISOString(),
+    };
+  });
 }
 
 /** Proof/journal rows (the 5 constraints) for the Verifications tab. */
